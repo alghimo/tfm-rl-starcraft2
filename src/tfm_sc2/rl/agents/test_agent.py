@@ -2,7 +2,9 @@ from pysc2.agents import base_agent
 from pysc2.env import sc2_env
 from pysc2.lib import actions, features
 from absl import app
+from ..utils import xy_locs, enemy_locs, self_locs
 
+import numpy as np
 
 _PLAYER_SELF = features.PlayerRelative.SELF
 _PLAYER_NEUTRAL = features.PlayerRelative.NEUTRAL  # beacon/minerals
@@ -11,20 +13,112 @@ _PLAYER_ENEMY = features.PlayerRelative.ENEMY
 FUNCTIONS = actions.FUNCTIONS
 RAW_FUNCTIONS = actions.RAW_FUNCTIONS
 
-def _xy_locs(mask):
-  """Mask should be a set of bools from comparison with a feature layer."""
-  y, x = mask.nonzero()
-  return list(zip(x, y))
-
-def _self_locs():
-    return _xy_locs(_PLAYER_SELF)
-
-def _enemy_locs():
-    return _xy_locs(_PLAYER_ENEMY)
 
 class TestAgent(base_agent.BaseAgent):
     def step(self, obs):
         super().step(obs)
+
+        if FUNCTIONS.Attack_screen.id in obs.observation.available_actions:
+
+            player_relative = obs.observation.feature_screen.player_relative
+            roaches = xy_locs(player_relative == _PLAYER_ENEMY)
+
+            if not roaches:
+                return FUNCTIONS.no_op()
+
+            # Find the roach with max y coord.
+            target = roaches[np.argmax(np.array(roaches)[:, 1])]
+            return FUNCTIONS.Attack_screen("now", target)
+        else:
+            print("Attack_screen.id not in available actions")
+
+        if FUNCTIONS.select_army.id in obs.observation.available_actions:
+            # Selects all army
+            print("Selecting army")
+            return FUNCTIONS.select_army("select")
+
+        import pdb
+
+        pdb.set_trace()
+        print("Observation keys: ", list(obs.observation.keys()))
+        """
+        Observation keys:
+        [
+            'single_select', 'multi_select', 'build_queue', 'cargo', 'production_queue', 'last_actions',
+            'cargo_slots_available', 'home_race_requested', 'away_race_requested', 'map_name', 'feature_screen',
+            'feature_minimap', 'action_result', 'alerts', 'game_loop', 'score_cumulative', 'score_by_category',
+            'score_by_vital', 'player', 'control_groups', 'feature_units', 'feature_effects', 'raw_units',
+            'raw_effects', 'upgrades', 'available_actions', 'radar']
+        """
+
+        print(obs.observation.feature_units._index_names)
+        """
+        [
+            None,
+            {
+                'unit_type': 0, 'alliance': 1, 'health': 2, 'shield': 3, 'energy': 4, 'cargo_space_taken': 5,
+                'build_progress': 6, 'health_ratio': 7, 'shield_ratio': 8, 'energy_ratio': 9, 'display_type': 10,
+                'owner': 11, 'x': 12, 'y': 13, 'facing': 14, 'radius': 15, 'cloak': 16, 'is_selected': 17,
+                'is_blip': 18, 'is_powered': 19, 'mineral_contents': 20, 'vespene_contents': 21,
+                'cargo_space_max': 22, 'assigned_harvesters': 23, 'ideal_harvesters': 24, 'weapon_cooldown': 25,
+                'order_length': 26, 'order_id_0': 27, 'order_id_1': 28, 'tag': 29, 'hallucination': 30,
+                'buff_id_0': 31, 'buff_id_1': 32, 'addon_unit_type': 33, 'active': 34, 'is_on_screen': 35,
+                'order_progress_0': 36, 'order_progress_1': 37, 'order_id_2': 38, 'order_id_3': 39,
+                'is_in_cargo': 40, 'buff_duration_remain': 41, 'buff_duration_max': 42, 'attack_upgrade_level': 43,
+                'armor_upgrade_level': 44, 'shield_upgrade_level': 45
+            }
+        ]
+        """
+        len(obs.observation.feature_units)
+        # 13
+        print([u.alliance for u in obs.observation.feature_units])
+        print([u.is_selected for u in obs.observation.feature_units if u.alliance == 1])
+
+        # [1, 1, 1, 1, 4, 4, 4, 4, 1, 1, 1, 1, 1]
+        print([u.tag for u in obs.observation.feature_units])
+        # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        print([u.active for u in obs.observation.feature_units])
+        # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        print(
+            [
+                f"x={u.x}, y={u.y}"
+                for u in obs.observation.feature_units
+                if u.alliance == 4
+            ]
+        )
+        # ['x=71, y=21', 'x=71, y=28', 'x=71, y=31', 'x=71, y=24']
+        print(
+            [
+                f"x={u.x}, y={u.y}"
+                for u in obs.observation.feature_units
+                if u.alliance == 4
+            ]
+        )
+        # ['x=71, y=21', 'x=71, y=28', 'x=71, y=31', 'x=71, y=24']
+
+        print(obs.observation.raw_units._index_names)
+        """
+        [
+            None,
+            {
+                'unit_type': 0, 'alliance': 1, 'health': 2, 'shield': 3, 'energy': 4, 'cargo_space_taken': 5,
+                'build_progress': 6, 'health_ratio': 7, 'shield_ratio': 8, 'energy_ratio': 9, 'display_type': 10,
+                'owner': 11, 'x': 12, 'y': 13, 'facing': 14, 'radius': 15, 'cloak': 16, 'is_selected': 17,
+                'is_blip': 18, 'is_powered': 19, 'mineral_contents': 20, 'vespene_contents': 21,
+                'cargo_space_max': 22, 'assigned_harvesters': 23, 'ideal_harvesters': 24, 'weapon_cooldown': 25,
+                'order_length': 26, 'order_id_0': 27, 'order_id_1': 28, 'tag': 29, 'hallucination': 30,
+                'buff_id_0': 31, 'buff_id_1': 32, 'addon_unit_type': 33, 'active': 34, 'is_on_screen': 35,
+                'order_progress_0': 36, 'order_progress_1': 37, 'order_id_2': 38, 'order_id_3': 39,
+                'is_in_cargo': 40, 'buff_duration_remain': 41, 'buff_duration_max': 42, 'attack_upgrade_level': 43,
+                'armor_upgrade_level': 44, 'shield_upgrade_level': 45
+            }
+        ]
+        """
+        len(obs.observation.raw_units)
+
+        print(obs.observation.feature_units.unit_type)
+        print(obs.observation.feature_units._index_names)
+        self._get_units_info(obs)
 
         import pdb
 
@@ -118,3 +212,39 @@ class TestAgent(base_agent.BaseAgent):
         print(obs.observation["single_select"])
         []
         return actions.FUNCTIONS.no_op()
+
+    def _get_units_info(self, obs, player_relative: features.PlayerRelative = None):
+        player_relative_map = obs.observation.feature_screen.player_relative
+        if player_relative is None:
+            mask = player_relative_map > 0
+        else:
+            mask = player_relative_map == player_relative
+
+        unit_locations = xy_locs(mask)
+
+        if not any(unit_locations):
+            return []
+
+        import pdb
+
+        pdb.set_trace()
+        hit_points = obs.observation.feature_screen.unit_hit_points * enemy_locs
+        hit_points_ratio = (
+            obs.observation.feature_screen.unit_hit_points_ratio * enemy_locs
+        )
+        energy = obs.observation.feature_screen.unit_energy * enemy_locs
+        energy_ratio = obs.observation.feature_screen.unit_energy_ratio * enemy_locs
+        shields = obs.observation.feature_screen.unit_shields * enemy_locs
+        unit_shields_ratio = obs.observation.feature_screen.unit_shields * enemy_locs
+
+    def _get_enemy_units(self, obs):
+        enemy_locs = enemy_locs()
+
+        hit_points = obs.observation.feature_screen.unit_hit_points * enemy_locs
+        hit_points_ratio = (
+            obs.observation.feature_screen.unit_hit_points_ratio * enemy_locs
+        )
+        energy = obs.observation.feature_screen.unit_energy * enemy_locs
+        energy_ratio = obs.observation.feature_screen.unit_energy_ratio * enemy_locs
+        shields = obs.observation.feature_screen.unit_shields * enemy_locs
+        unit_shields_ratio = obs.observation.feature_screen.unit_shields * enemy_locs

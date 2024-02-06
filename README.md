@@ -75,6 +75,12 @@ python -m pysc2.bin.agent --map CollectMineralShards --agent tfm_sc2.rl.agents.t
 python -m pysc2.bin.agent --map DefeatRoaches --agent tfm_sc2.rl.agents.test_agent.TestAgent
 ```
 
+```bash
+python -m pysc2.bin.agent --map DefeatRoaches --agent tfm_sc2.rl.agents.test_agent.TestAgent --use_feature_units --use_raw_units
+```
+
+
+
 
 ## Troubleshooting
 
