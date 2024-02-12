@@ -1,12 +1,11 @@
-from pysc2.agents import base_agent
 from pysc2.env import sc2_env
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, features
 from absl import app
 import numpy as np
-from tfm_sc2.rl.agents.agent_utils import AgentUtils
 
 from ..utils import xy_locs, enemy_locs, self_locs
+from .base_agent import BaseAgent
 
 _PLAYER_SELF = features.PlayerRelative.SELF
 _PLAYER_NEUTRAL = features.PlayerRelative.NEUTRAL  # beacon/minerals
@@ -16,17 +15,15 @@ FUNCTIONS = actions.FUNCTIONS
 RAW_FUNCTIONS = actions.RAW_FUNCTIONS
 
 
-class TestAgent(AgentUtils, base_agent.BaseAgent):
+class TestAgent(BaseAgent):
     def step(self, obs: TimeStep):
         super().step(obs)
-
-        player_relative = obs.observation.feature_screen.player_relative
-        roaches = xy_locs(player_relative == _PLAYER_ENEMY)
-        target = roaches[np.argmax(np.array(roaches)[:, 1])]
 
         import pdb
 
         pdb.set_trace()
+        
+
         if self.can_attack(obs):
             roaches = self.get_enemy_positions(obs)
 

@@ -1,15 +1,30 @@
+from typing import List
+from typing import TYPE_CHECKING
+
 import numpy as np
+from pysc2.agents import base_agent
 from pysc2.env.environment import TimeStep
 from pysc2.lib.features import PlayerRelative
-from tfm_sc2.rl.agents.test_agent import _PLAYER_ENEMY, FUNCTIONS
-from tfm_sc2.rl.types import Position
-from tfm_sc2.rl.utils import xy_locs
+from pysc2.lib import actions, features
+
+from ..types import Position
 
 
-from typing import List
+class BaseAgent(base_agent.BaseAgent):
+    def select_target_enemy(self, enemies: List[Position], obs: TimeStep, **kwargs):
+        """Given a list of enemies, selects one of them.
 
+        Args:
+            enemies (List[Position]): List of enemies, usually obtained via self.get_enemy_positions.
+            obs (TimeStep): Observation, can be used for conext or as support to make the decision.
 
-class AgentUtils:
+        Returns:
+            Position: The Position of the selected enemy.
+        """
+
+        # Simply return the first enemy
+        return enemies[np.argmax(np.array(enemies)[:, 1])]
+
     def get_enemy_positions(self, obs: TimeStep) -> List[Position]:
         """Get a list with all enemy positions.
 
@@ -26,32 +41,7 @@ class AgentUtils:
         enemies = self.get_positions(player_relative == PlayerRelative.ENEMY)
 
         return enemies
-
-    def select_target_enemy(self, enemies: List[Position], obs: TimeStep, **kwargs):
-        """Given a list of enemies, selects one of them.
-
-        Args:
-            enemies (List[Position]): List of enemies, usually obtained via self.get_enemy_positions.
-            obs (TimeStep): Observation, can be used for conext or as support to make the decision.
-
-        Returns:
-            Position: The Position of the selected enemy.
-        """
-
-        # Simply return the first enemy
-        return enemies[np.argmax(np.array(enemies)[:, 1])]
-
-    def _can_do(self, function_id: int, obs: TimeStep) -> bool:
-        return function_id in obs.observation.available_actions
-
-    def can_attack(self, obs: TimeStep) -> bool:
-        """Checks whether the Attack_screen action is available."""
-        return self._can_do(FUNCTIONS.Attack_screen.id, obs)
-
-    def can_select_army(self, obs: TimeStep) -> bool:
-        """Checks whether the select_army action is available."""
-        return self._can_do(FUNCTIONS.select_army.id, obs)
-
+    
     def get_positions(self, mask: np.array) -> List[Position]:
         """Extract positions from a mask.
 
@@ -99,3 +89,16 @@ class AgentUtils:
         """
         player_relative = obs.observation.feature_screen.player_relative
         return self.get_positions(player_relative == PlayerRelative.NEUTRAL)
+
+    def can_attack(self, obs: TimeStep) -> bool:
+        """Checks whether the Attack_screen action is available."""
+        return self._can_do(features.FUNCTIONS.Attack_screen.id, obs)
+
+    def can_select_army(self, obs: TimeStep) -> bool:
+        """Checks whether the select_army action is available."""
+        return self._can_do(features.FUNCTIONS.select_army.id, obs)
+    
+    def _can_do(self, function_id: int, obs: TimeStep) -> bool:
+        return function_id in obs.observation.available_actions
+
+    
