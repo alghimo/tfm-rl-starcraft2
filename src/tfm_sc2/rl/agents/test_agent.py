@@ -1,10 +1,12 @@
 from pysc2.agents import base_agent
 from pysc2.env import sc2_env
+from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, features
 from absl import app
-from ..utils import xy_locs, enemy_locs, self_locs
-
 import numpy as np
+from tfm_sc2.rl.agents.agent_utils import AgentUtils
+
+from ..utils import xy_locs, enemy_locs, self_locs
 
 _PLAYER_SELF = features.PlayerRelative.SELF
 _PLAYER_NEUTRAL = features.PlayerRelative.NEUTRAL  # beacon/minerals
@@ -14,25 +16,31 @@ FUNCTIONS = actions.FUNCTIONS
 RAW_FUNCTIONS = actions.RAW_FUNCTIONS
 
 
-class TestAgent(base_agent.BaseAgent):
-    def step(self, obs):
+class TestAgent(AgentUtils, base_agent.BaseAgent):
+    def step(self, obs: TimeStep):
         super().step(obs)
 
-        if FUNCTIONS.Attack_screen.id in obs.observation.available_actions:
+        player_relative = obs.observation.feature_screen.player_relative
+        roaches = xy_locs(player_relative == _PLAYER_ENEMY)
+        target = roaches[np.argmax(np.array(roaches)[:, 1])]
 
-            player_relative = obs.observation.feature_screen.player_relative
-            roaches = xy_locs(player_relative == _PLAYER_ENEMY)
+        import pdb
+
+        pdb.set_trace()
+        if self.can_attack(obs):
+            roaches = self.get_enemy_positions(obs)
 
             if not roaches:
                 return FUNCTIONS.no_op()
 
             # Find the roach with max y coord.
-            target = roaches[np.argmax(np.array(roaches)[:, 1])]
+            target = self.select_target_enemy(roaches)
+
             return FUNCTIONS.Attack_screen("now", target)
         else:
             print("Attack_screen.id not in available actions")
 
-        if FUNCTIONS.select_army.id in obs.observation.available_actions:
+        if self.can_select_army(obs):
             # Selects all army
             print("Selecting army")
             return FUNCTIONS.select_army("select")
