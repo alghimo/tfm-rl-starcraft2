@@ -9,7 +9,7 @@ First off, this assumes that you have already setup Starcraft two, as stated in 
 As for the environment, we've setup Python 3.8, since with newer versions the installation seemed to be broken (I couldn't get pysc2 to work with pygame>=2, and I could only install pygame<2 up until python 3.8).
 
 ```bash
-conda create -n tfm python=3.8
+conda create -n tfm python=3.10
 conda activate tfm
 # Go to the project root
 cd tfm-rl-starcraft2
@@ -17,22 +17,43 @@ cd tfm-rl-starcraft2
 pip install -e src/
 ```
 
-You can now test runnign a random agent with this command:
+You can now test running a random agent with this command:
 
 ```bash
 python -m pysc2.bin.agent --map CollectMineralShards --feature_screen_size=256 --feature_minimap_size=128
 ```
 
+Or you can also play with:
+
+```bash
+python -m pysc2.bin.play --map CollectMineralShards --feature_screen_size=256 --feature_minimap_size=128
+```
+
 This should write a replay, you can look for a line like this in your output:
 
 ```bash
-I0204 12:00:02.995138 140405932926784 sc2_env.py:736] Wrote replay to: /home/albert/StarCraftII/Replays/RandomAgent/CollectMineralShards_2024-02-04-11-00-02.SC2Replay
+Wrote replay to: C:/Program Files (x86)/StarCraft II\Replays\local\CollectMineralShards_2024-02-16-11-47-57.SC2Replay
 ```
 
 Now, test that you can indeed show the replay:
 
 ```bash
-python -m pysc2.bin.play --rgb_screen_size=1600,1200 --replay /home/albert/StarCraftII/Replays/RandomAgent/CollectMineralShards_2024-02-04-11-00-02.SC2Replay
+python -m pysc2.bin.play --rgb_screen_size=1600,1200 --replay "C:/Program Files (x86)/StarCraft II\Replays\local\CollectMineralShards_2024-02-16-11-47-57.SC2Replay"
+```
+
+**Note**: At the time of this writing, we had to add this line for the replays to work on Windows, SC2 version 5.0.12:
+
+```python
+# File: pysc2/run_configs/platforms.py
+# Method: get_versions
+# Added at line: 102 (after the first known_versions.append and before the ret = lib.version_dict...)
+    known_versions.append(
+        lib.Version("latest", max(versions_found), None, None))
+    # This is the extra line
+    known_versions.append(
+        lib.Version("5.0.12", max(versions_found), None, None))
+    # End of extra line
+    ret = lib.version_dict(known_versions)
 ```
 
 ## Maps
