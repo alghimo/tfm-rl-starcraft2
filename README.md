@@ -6,7 +6,7 @@ Master thesis - RL - Starcraft II
 
 First off, this assumes that you have already setup Starcraft two, as stated in the [PySC2 instructions](https://github.com/google-deepmind/pysc2/tree/master?tab=readme-ov-file#get-starcraft-ii). The work for this project was done under Linux (Ubuntu 22.04) and used the latest [Starcraft II Linux package](https://github.com/Blizzard/s2client-proto#linux-packages) available at the time (4.10).
 
-As for the environment, we've setup Python 3.8, since with newer versions the installation seemed to be broken (I couldn't get pysc2 to work with pygame>=2, and I could only install pygame<2 up until python 3.8).
+As for the environment, it is not very consistent between different OS, e.g. for Ubuntu 22.04 I had to go with Python 3.8 and pygame 1.9.6, for MacOS I was able to use Python 3.9 and pygame 2 (the default installed by pysc2) and for Windows I could use Python 3.10.
 
 ```bash
 conda create -n tfm python=3.10
@@ -15,6 +15,10 @@ conda activate tfm
 cd tfm-rl-starcraft2
 # Installing the package will also install pysc2==4.0.0, pygame==1.9.6 and protobuf 3.19.6
 pip install -e src/
+# Install pytorch
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# Install jupyterlab
+pip install jupyterlab
 ```
 
 You can now test running a random agent with this command:
@@ -89,11 +93,11 @@ python -m pysc2.bin.play --map CollectMineralShards --feature_screen_size=256 --
 ### Test agent
 
 ```bash
-python -m pysc2.bin.agent --map CollectMineralShards --agent tfm_sc2.rl.agents.test_agent.TestAgent
+python -m pysc2.bin.agent --map CollectMineralShards --agent tfm_sc2.rl.agents.test_agent.TestAgent --use_feature_units --use_raw_units
 ```
 
 ```bash
-python -m pysc2.bin.agent --map DefeatRoaches --agent tfm_sc2.rl.agents.test_agent.TestAgent
+python -m pysc2.bin.agent --map DefeatRoaches --agent tfm_sc2.rl.agents.test_agent.TestAgent --use_feature_units --use_raw_units
 ```
 
 ```bash

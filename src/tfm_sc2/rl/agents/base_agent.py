@@ -1,16 +1,22 @@
-from typing import List
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 import numpy as np
 from pysc2.agents import base_agent
 from pysc2.env.environment import TimeStep
+from pysc2.lib import actions, features, units
 from pysc2.lib.features import PlayerRelative
-from pysc2.lib import actions, features
 
 from ..types import Position
 
 
 class BaseAgent(base_agent.BaseAgent):
+    HARVEST_ACTIONS = [
+        359, # Function.raw_ability(359, "Harvest_Gather_SCV_unit", raw_cmd_unit, 295, 3666),
+        362, # Function.raw_ability(362, "Harvest_Return_SCV_quick", raw_cmd, 296, 3667),
+    ]
+    
+    
+
     def select_target_enemy(self, enemies: List[Position], obs: TimeStep, **kwargs):
         """Given a list of enemies, selects one of them.
 
@@ -91,14 +97,87 @@ class BaseAgent(base_agent.BaseAgent):
         return self.get_positions(player_relative == PlayerRelative.NEUTRAL)
 
     def can_attack(self, obs: TimeStep) -> bool:
-        """Checks whether the Attack_screen action is available."""
+        """Checks whether the Attack_screen action is available.
+
+        Args:
+            obs (TimeStep): An observation from the environment.
+
+        Returns:
+            bool: True if the attack action is available.
+        """
         return self._can_do(features.FUNCTIONS.Attack_screen.id, obs)
 
     def can_select_army(self, obs: TimeStep) -> bool:
-        """Checks whether the select_army action is available."""
+        """Checks whether the select_army action is available.
+
+        Args:
+            obs (TimeStep): An observation from the environment.
+
+        Returns:
+            bool: True if the action to select the army is available.
+        """
         return self._can_do(features.FUNCTIONS.select_army.id, obs)
     
     def _can_do(self, function_id: int, obs: TimeStep) -> bool:
+        """Checks whether an action can be performed.
+
+        Args:
+            function_id (int): The ID of the action.
+            obs (TimeStep): An observation from the environment.
+
+        Returns:
+            bool: True if the action is available.
+        """
         return function_id in obs.observation.available_actions
 
-    
+    def get_self_units(self, obs: TimeStep, unit_types: int | List[int] = None) -> List[features.FeatureUnit]:
+        """Get a list of the player's own units.
+
+        Args:
+            obs (TimeStep): Observation from the environment
+            unit_type (int | List[int], optional): Type of unit(s) to get. If provided, only units of this type(s) will be
+                                       returned, otherwise all units are returned.
+
+        Returns:
+            List[features.FeatureUnit]: _description_
+        """
+        units = filter(lambda u: u.alliance == PlayerRelative.SELF, obs.observation.raw_units)
+
+        if unit_types is None:
+            return units
+        
+        if isinstance(unit_types, int):
+            return filter(lambda u: u.unit_type == unit_types, units)
+
+
+        return filter(lambda u: u.unit_type in unit_types, units)
+
+    def get_idle_scvs(self, obs: TimeStep) -> List[features.FeatureUnit]:
+        """Gets all idle SCVs.
+
+        Args:
+            obs (TimeStep): Observation from the environment
+
+        Returns:
+            List[features.FeatureUnit]: List of idle SCVs
+        """
+        self_scvs = self.get_self_units(obs, units.Terran.SCV)
+        idle_scvs = filter(self_scvs, self.is_idle)
+
+        return idle_scvs
+
+    def get_harvester_scvs(self, obs: TimeStep) -> List[features.FeatureUnit]:
+        """Get a list of all SCVs that are currently harvesting.
+
+        Args:
+            obs (TimeStep): Observation from the environment.
+
+        Returns:
+            List[features.FeatureUnit]: List of SCVs that are harvesting.
+        """
+        all_scvs = self.get_self_units(obs, , units.Terran.SCV)
+        return filter(lambda scv: scv.order_id_0 in self.HARVEST_ACTIONS, all_scvs)
+
+    def is_idle(self, unit: features.FeatureUnit) -> bool:
+        """Check whether a unit is idle (meaning it has no orders in the queue)"""
+        return unit.order_length == 0
