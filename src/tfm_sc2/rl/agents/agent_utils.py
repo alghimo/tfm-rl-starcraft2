@@ -6,7 +6,7 @@ from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, features, units
 from pysc2.lib.features import PlayerRelative
 
-from ..types import Position
+from ...types import Position
 from ...with_logger import WithLogger
 
 
@@ -160,7 +160,7 @@ class AgentUtils(WithLogger):
         Returns:
             List[features.FeatureUnit]: List of SCVs that are harvesting.
         """
-        all_scvs = self.get_self_units(obs, , units.Terran.SCV)
+        all_scvs = self.get_self_units(obs, units.Terran.SCV)
         return filter(lambda scv: scv.order_id_0 in self.HARVEST_ACTIONS, all_scvs)
 
     def is_idle(self, unit: features.FeatureUnit) -> bool:

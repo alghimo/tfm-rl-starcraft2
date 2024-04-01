@@ -6,7 +6,7 @@ from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, features, units
 from pysc2.lib.features import PlayerRelative
 
-from ..types import Position
+from ...types import Position
 from .agent_utils import AgentUtils
 
 
@@ -15,6 +15,10 @@ class BaseAgent(AgentUtils, base_agent.BaseAgent):
         359, # Function.raw_ability(359, "Harvest_Gather_SCV_unit", raw_cmd_unit, 295, 3666),
         362, # Function.raw_ability(362, "Harvest_Return_SCV_quick", raw_cmd, 296, 3667),
     ]
+
+    _action_mapper = {
+
+    }
     
     def step(self, obs: TimeStep):
         obs = self.preprocess_observation(obs)

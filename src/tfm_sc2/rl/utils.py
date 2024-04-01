@@ -1,6 +1,6 @@
 from typing import List
 from pysc2.lib import actions, features
-from .types import Position
+from ..types import Position
 
 _PLAYER_SELF = features.PlayerRelative.SELF
 _PLAYER_NEUTRAL = features.PlayerRelative.NEUTRAL  # beacon/minerals

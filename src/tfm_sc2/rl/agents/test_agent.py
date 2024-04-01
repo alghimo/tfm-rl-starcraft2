@@ -1,10 +1,10 @@
+import numpy as np
+from absl import app
 from pysc2.env import sc2_env
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, features
-from absl import app
-import numpy as np
 
-from ..utils import xy_locs, enemy_locs, self_locs
+from ..utils import enemy_locs, self_locs, xy_locs
 from .base_agent import BaseAgent
 
 _PLAYER_SELF = features.PlayerRelative.SELF
@@ -13,11 +13,16 @@ _PLAYER_ENEMY = features.PlayerRelative.ENEMY
 
 FUNCTIONS = actions.FUNCTIONS
 RAW_FUNCTIONS = actions.RAW_FUNCTIONS
+from ...types import Minerals
 
 
 class TestAgent(BaseAgent):
     def step(self, obs: TimeStep):
         super().step(obs)
+
+        raw_units = obs.observation.raw_units
+        mineral_units_raw = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
+        mineral_units_feat = [unit for unit in obs.observation.feature_units if Minerals.contains(unit.unit_type)]
 
         import pdb
 

@@ -7,10 +7,6 @@ Position = namedtuple("Position", ["x", "y"])
 MapUnitInfo = namedtuple("MapUnitInfo", ["player_relative", "unit_type", "tag", "hit_points", "hit_points_ratio", "energy", "energy_ratio", "shields", "shields_ratio"])
 
 
-ProtossGasCrystalItem = 1674 # Added
-TerranGasCanisterItem = 1673 # Added
-ZergGasPodItem = 1675 # Added
-
 class PickupItems(IntEnum):
     GasPallet500 = Neutral.PickupGasPallet500
     HugeScrapSalvage = Neutral.PickupHugeScrapSalvage
@@ -18,19 +14,23 @@ class PickupItems(IntEnum):
     MineralCrystalItem = Neutral.MineralCrystalItem
     MineralPallet = Neutral.MineralPallet
     MineralShards = Neutral.MineralShards
-    NaturalGas = Neutral.Gas
+    NaturalGas = Neutral.NaturalGas
     NaturalMineralShards = Neutral.NaturalMineralShards
     ProtossGasCrystalItem = Neutral.ProtossGasCrystalItem
     SmallScrapSalvage = Neutral.PickupSmallScrapSalvage
     TerranGasCanisterItem = Neutral.TerranGasCanisterItem
     ZergGasPodItem = Neutral.ZergGasPodItem
 
+    @staticmethod
+    def contains(unit):
+        return unit in list(PickupItems)
+
 class Minerals(IntEnum):
     BattleStationMineralField = Neutral.BattleStationMineralField
     BattleStationMineralField750 = Neutral.BattleStationMineralField750
     LabMineralField = Neutral.LabMineralField
     LabMineralField750 = Neutral.LabMineralField750
-    MineralField = Neutral.Neutral.MineralField
+    MineralField = Neutral.MineralField
     MineralField450 = Neutral.MineralField450
     MineralField750 = Neutral.MineralField750
     PurifierMineralField = Neutral.PurifierMineralField
@@ -40,6 +40,10 @@ class Minerals(IntEnum):
     RichMineralField = Neutral.RichMineralField
     RichMineralField750 = Neutral.RichMineralField750
 
+    @staticmethod
+    def contains(unit):
+        return unit in list(Minerals)
+
 class Gas(IntEnum):
     ProtossVespeneGeyser = Neutral.ProtossVespeneGeyser
     PurifierVespeneGeyser = Neutral.PurifierVespeneGeyser
@@ -47,6 +51,10 @@ class Gas(IntEnum):
     ShakurasVespeneGeyser = Neutral.ShakurasVespeneGeyser
     SpacePlatformGeyser = Neutral.SpacePlatformGeyser
     VespeneGeyser = Neutral.VespeneGeyser
+
+    @staticmethod
+    def contains(unit):
+        return unit in list(Gas)
 
 class ScvState(IntEnum):
     IDLE = 0

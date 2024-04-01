@@ -3,7 +3,7 @@ from typing import Dict
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, features, units
 
-from ...types import ScvState
+from ....types import ScvState
 from ..agent_utils import AgentUtils
 
 
