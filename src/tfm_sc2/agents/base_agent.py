@@ -9,9 +9,10 @@ from pysc2.lib.features import PlayerRelative
 from pysc2.lib.named_array import NamedNumpyArray
 
 from ..actions import AllActions
-from ..types import Position, Minerals, Gas
-from ..with_logger import WithLogger
 from ..constants import SC2Costs
+from ..types import Gas, Minerals, Position
+from ..with_logger import WithLogger
+
 # from .agent_utils import AgentUtils
 
 
@@ -36,19 +37,35 @@ class BaseAgent(base_agent.BaseAgent, WithLogger, ABC):
     def agent_actions(self) -> List[AllActions]:
         pass
 
-    def step(self, obs: TimeStep) -> AllActions:
-        obs = self.preprocess_observation(obs)
-        action, action_args = self.select_action(obs)
-
-        return action
-    
-    def preprocess_observation(self, obs: TimeStep) -> TimeStep:
-        return obs
-    
     @abstractmethod
     def select_action(self, obs: TimeStep):
         pass
         # return actions.FUNCTIONS.no_op()
+
+    @abstractmethod
+    def get_next_command_center_position(self) -> Position:
+        pass
+
+    @abstractmethod
+    def get_next_supply_depot_position(self) -> Position:
+        pass
+
+    def step(self, obs: TimeStep) -> AllActions:
+        obs = self.preprocess_observation(obs)
+        action, action_args = self.select_action(obs)
+
+        match action_args:
+            case args if isinstance(args, dict):
+                return action(**args)
+            case _:
+                return action()
+        # return actions.RAW_FUNCTIONS.no_op()
+    
+    def preprocess_observation(self, obs: TimeStep) -> TimeStep:
+        return obs
+    
+    def available_actions(self, obs: TimeStep) -> List[AllActions]:
+        return [a for a in self.agent_actions if self.can_take(obs, a)]
 
     def take(self, obs: TimeStep, action: AllActions, *action_args):
         if action not in self._action_to_game:
@@ -75,36 +92,68 @@ class BaseAgent(base_agent.BaseAgent, WithLogger, ABC):
             case AllActions.NO_OP, _:
                 return True
             case AllActions.HARVEST_MINERALS, (position) if isinstance(position, Position):
-                minerals = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x = position.x and unit.y = position.y]
+                minerals = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
                 if not any(minerals):
-                    self.logger.debug(f"[Action {action}] There are no minerals to harvest at position {position}")
+                    self.logger.debug(f"[Action {action} + position] There are no minerals to harvest at position {position}")
                     return False
                 
                 if self.has_idle_workers(obs.observation.player):
                     return True
                 elif self.has_workers(obs.observation.player):
-                    self.logger.debug(f"[Action {action}] Player has no idle SCVs, but has other available SCVs.")
+                    self.logger.debug(f"[Action {action} + position] Player has no idle SCVs, but has other available SCVs.")
                     return True
                 
-                self.logger.debug(f"[Action {action}] The target position has minerals, but the player has no SCVs.")
+                self.logger.debug(f"[Action {action} + position] The target position has minerals, but the player has no SCVs.")
+                return False
+            case AllActions.HARVEST_MINERALS, _:
+                minerals = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
+                if not any(minerals):
+                    self.logger.debug(f"[Action {action} without position] There are no minerals on the map")
+                    return False
+                
+                if self.has_idle_workers(obs.observation.player):
+                    return True
+                elif self.has_workers(obs.observation.player):
+                    self.logger.debug(f"[Action {action} without position] Player has no idle SCVs, but has other available SCVs.")
+                    return True
+                
+                self.logger.debug(f"[Action {action} without position] There are minerals available, but the player has no SCVs.")
                 return False
             case AllActions.BUILD_REFINERY, (position) if isinstance(position, Position):
-                geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type) and unit.x = position.x and unit.y = position.y]
+                geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
                 if not any(geysers):
-                    self.logger.debug(f"[Action {action}] There are no vespene geysers at position {position} (or they already have a structure)")
+                    self.logger.debug(f"[Action {action} + position] There are no vespene geysers at position {position} (or they already have a structure)")
                     return False
                 
                 if not SC2Costs.REFINERY.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action}] There are is a vespene geyser at position {position} but the player can't pay the cost ({SC2Costs.REFINERY})")
+                    self.logger.debug(f"[Action {action} + position] There are is a vespene geyser at position {position} but the player can't pay the cost ({SC2Costs.REFINERY})")
                     return False
 
                 if self.has_idle_workers(obs.observation.player):
                     return True
                 elif self.has_workers(obs.observation.player):
-                    self.logger.debug(f"[Action {action}] Player has no idle SCVs, but has other available SCVs.")
+                    self.logger.debug(f"[Action {action} + position] Player has no idle SCVs, but has other available SCVs.")
                     return True
                 
-                self.logger.debug(f"[Action {action}] The target position has a vespene geyser and the player can pay the cust, but the player has no SCVs.")
+                self.logger.debug(f"[Action {action} + position] The target position has a vespene geyser and the player can pay the cust, but the player has no SCVs.")
+                return False
+            case AllActions.BUILD_REFINERY, _:
+                geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
+                if not any(geysers):
+                    self.logger.debug(f"[Action {action} without position] There are no vespene geysers on the map(or they already have a structure)")
+                    return False
+                
+                if not SC2Costs.REFINERY.can_pay(obs.observation.player):
+                    self.logger.debug(f"[Action {action} without position] There are are vespene geysers available but the player can't pay the cost ({SC2Costs.REFINERY})")
+                    return False
+
+                if self.has_idle_workers(obs.observation.player):
+                    return True
+                elif self.has_workers(obs.observation.player):
+                    self.logger.debug(f"[Action {action} without position] Player has no idle SCVs, but has other available SCVs.")
+                    return True
+                
+                self.logger.debug(f"[Action {action} without position] There are free vespene geysers and the player can pay the cust, but the player has no SCVs.")
                 return False
             case AllActions.RECRUIT_SCV, (command_center_tag):
                 command_centers = self.get_self_units(unit_types=units.Terran.CommandCenter, unit_tags=command_center_tag)
