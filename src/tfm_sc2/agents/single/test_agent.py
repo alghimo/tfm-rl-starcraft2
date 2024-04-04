@@ -29,14 +29,15 @@ class TestAgent(BaseAgent):
         return list(set(list(ResourceManagerActions) + list(BaseManagerActions)))
 
     def select_action(self, obs: TimeStep):
+        print(self.available_actions(obs))
         import pdb
         pdb.set_trace()
         return random.choice(self.available_actions(obs))
 
-    def get_next_command_center_position(self) -> Position:
+    def get_next_command_center_position(self, obs: TimeStep) -> Position:
         return None
     
-    def get_next_supply_depot_position(self) -> Position:
+    def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
         return None
 
     # def step(self, obs: TimeStep):
