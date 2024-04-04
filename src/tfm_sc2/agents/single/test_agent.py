@@ -1,11 +1,11 @@
 import random
-from typing import List
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 from absl import app
 from pysc2.env import sc2_env
 from pysc2.env.environment import TimeStep
-from pysc2.lib import actions, features
+from pysc2.lib import actions, features, units
 
 from ...actions import AllActions, BaseManagerActions, ResourceManagerActions
 from ...types import Position
@@ -24,15 +24,40 @@ from ...types import Minerals
 
 class TestAgent(BaseAgent):
     
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.__agent_actions = list(set(list(ResourceManagerActions) + list(BaseManagerActions)))
+    
     @property
     def agent_actions(self) -> List[AllActions]:
-        return list(set(list(ResourceManagerActions) + list(BaseManagerActions)))
+        return [AllActions.HARVEST_MINERALS]
+        return self.__agent_actions
 
-    def select_action(self, obs: TimeStep):
-        print(self.available_actions(obs))
-        import pdb
-        pdb.set_trace()
-        return random.choice(self.available_actions(obs))
+    def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
+        action = random.choice(self.available_actions(obs))
+
+        match action:
+            case AllActions.NO_OP:
+                action_args = None
+            case AllActions.HARVEST_MINERALS:
+                minerals = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                idle_workers = self.get_idle_workers(obs)
+                
+                closest_worker, closest_mineral = self.select_closest_worker(obs, idle_workers, command_centers, minerals)
+
+                import pdb
+                pdb.set_trace()
+                action_args = dict(source_unit=closest_worker, target_unit=closest_mineral)
+            # case AllActions.COLLECT_GAS:
+            # case AllActions.BUILD_REFINERY:
+            # case AllActions.RECRUIT_SCV:
+            # case AllActions.BUILD_SUPPLY_DEPOT:
+            # case AllActions.BUILD_COMMAND_CENTER:
+            case _:
+                raise RuntimeError(f"Missing logic to select action args for action {action}")
+        
+        return action
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         return None

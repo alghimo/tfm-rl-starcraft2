@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 from pysc2.agents import base_agent
@@ -38,7 +38,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         pass
 
     @abstractmethod
-    def select_action(self, obs: TimeStep):
+    def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
         pass
         # return actions.FUNCTIONS.no_op()
 
@@ -73,13 +73,13 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         
         return self._action_to_game[action](*action_args)
 
-    def has_idle_workers(self, player: NamedNumpyArray) -> bool:
-        return player.idle_worker_count > 0
-    
-    def has_workers(self, player: NamedNumpyArray) -> bool:
-        return player.food_workers > 0
+    def has_idle_workers(self, obs: TimeStep) -> bool:
+        return len(self.get_idle_workers(obs)) > 0
 
-    def can_take(self, obs: TimeStep, action: AllActions, *action_args) -> bool:
+    def has_workers(self, obs: TimeStep) -> bool:
+        return len(self.get_self_units(obs, units.Terran.SCV)) > 0
+
+    def can_take(self, obs: TimeStep, action: AllActions, **action_args) -> bool:
         if action not in self.agent_actions:
             self.logger.warning(f"Tried to validate action {action} that is not available for this agent. Allowed actions: {self.agent_actions}")
             return False
@@ -87,39 +87,112 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             self.logger.warning(f"Tried to validate action {action} that is not yet implemented in the action to game mapper: {self._action_to_game.keys()}")
             return False
 
+        def _has_target_unit(args):
+            return "target_unit" in args and isinstance(args["target_unit"], Position)
         
+        def _has_source_unit(args):
+            return "source_unit" in args and isinstance(args["source_unit"], Position)
+
         match action, action_args:
             case AllActions.NO_OP, _:
                 return True
-            case AllActions.HARVEST_MINERALS, (position) if isinstance(position, Position):
-                self.logger.info(f"Checking action {action.name} ({action}) with position")
+            case AllActions.HARVEST_MINERALS, args if _has_target_unit(args) and _has_source_unit(args):
+                self.logger.info(f"Checking action {action.name} ({action}) with source and target units")
+                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+                if not any(command_centers):
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
+                    return False
+                
                 minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
                 if not any(minerals):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] There are no minerals to harvest at position {position}")
                     return False
                 
-                if self.has_idle_workers(obs.observation.player):
+                if self.has_idle_workers(obs):
                     return True
-                elif self.has_workers(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] Player has no idle SCVs, but has other available SCVs.")
-                    return True
+                # TODO Add check for workers harvesting gas
+
+                self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
+                return False
+            case AllActions.HARVEST_MINERALS, args if "target_position" in args and isinstance(args["target_position"], Position):
+                self.logger.info(f"Checking action {action.name} ({action}) with position")
+                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+                if not any(command_centers):
+                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
+                    return False
                 
+                minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
+                if not any(minerals):
+                    self.logger.debug(f"[Action {action.name} ({action}) + position] There are no minerals to harvest at position {position}")
+                    return False
+                
+                if self.has_idle_workers(obs):
+                    return True
+                # TODO Add check for workers harvesting gas
+
                 self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
                 return False
             case AllActions.HARVEST_MINERALS, _:
                 self.logger.info(f"Checking action {action.name} ({action}) with no position")
+                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+                
+                if not any(command_centers):
+                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
+                    return False
+                
                 minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
                 if not any(minerals):
                     self.logger.debug(f"[Action {action.name} ({action}) without position] There are no minerals on the map")
                     return False
                 
-                if self.has_idle_workers(obs.observation.player):
+                if self.has_idle_workers(obs):
                     return True
-                elif self.has_workers(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action}) without position] Player has no idle SCVs, but has other available SCVs.")
+                if self.has_workers(obs):
                     return True
+                # TODO Add check for workers harvesting gas
                 
                 self.logger.debug(f"[Action {action.name} ({action}) without position] There are minerals available, but the player has no SCVs.")
+                return False
+            case AllActions.COLLECT_GAS, (position) if isinstance(position, Position):
+                self.logger.info(f"Checking action {action.name} ({action}) with position")
+                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+                if not any(command_centers):
+                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
+                    return False
+                
+                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
+                refineries = [unit.tag for unit in refineries if unit.x == position.x and unit.y == position.y]
+                
+                if not any(refineries):
+                    self.logger.debug(f"[Action {action.name} ({action}) + position] There are no refineries to harvest at position {position}")
+                    return False
+                
+                if self.has_idle_workers(obs):
+                    return True
+                # TODO Add check for workers harvesting minerals
+                
+                self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
+                return False
+            case AllActions.COLLECT_GAS, _:
+                self.logger.info(f"Checking action {action.name} ({action}) with no position")
+                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+                if not any(command_centers):
+                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
+                    return False
+                
+                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
+                refineries = [unit.tag for unit in refineries]
+                if not any(refineries):
+                    self.logger.debug(f"[Action {action.name} ({action}) without position] There are no refineries on the map")
+                    return False
+                
+                if self.has_idle_workers(obs):
+                    return True
+                if self.has_workers(obs):
+                    return True
+                # TODO Add check for workers harvesting minerals
+                
+                self.logger.debug(f"[Action {action.name} ({action}) without position] There are refineries, but the player has no SCVs.")
                 return False
             case AllActions.BUILD_REFINERY, (position) if isinstance(position, Position):
                 geysers = [unit.tag for unit in obs.observation.raw_units if Gas.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
@@ -234,35 +307,76 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         
         return list(units)
 
-    def get_idle_scvs(self, obs: TimeStep) -> List[features.FeatureUnit]:
-        """Gets all idle SCVs.
+    def get_idle_workers(self, obs: TimeStep) -> List[features.FeatureUnit]:
+        """Gets all idle workers.
 
         Args:
             obs (TimeStep): Observation from the environment
 
         Returns:
-            List[features.FeatureUnit]: List of idle SCVs
+            List[features.FeatureUnit]: List of idle workers
         """
-        self_scvs = self.get_self_units(obs, units.Terran.SCV)
-        idle_scvs = filter(self_scvs, self.is_idle)
+        self_workers = self.get_self_units(obs, units.Terran.SCV)
+        idle_workers = filter(self.is_idle, self_workers)
 
-        return idle_scvs
+        return list(idle_workers)
 
-    def get_harvester_scvs(self, obs: TimeStep) -> List[features.FeatureUnit]:
-        """Get a list of all SCVs that are currently harvesting.
+    def get_harvester_workers(self, obs: TimeStep) -> List[features.FeatureUnit]:
+        """Get a list of all workers that are currently harvesting.
 
         Args:
             obs (TimeStep): Observation from the environment.
 
         Returns:
-            List[features.FeatureUnit]: List of SCVs that are harvesting.
+            List[features.FeatureUnit]: List of workers that are harvesting.
         """
-        all_scvs = self.get_self_units(obs, units.Terran.SCV)
-        return filter(lambda scv: scv.order_id_0 in self.HARVEST_ACTIONS, all_scvs)
+        all_workers = self.get_self_units(obs, units.Terran.SCV)
+        return list(filter(lambda worker: worker.order_id_0 in self.HARVEST_ACTIONS, all_workers))
 
     def is_idle(self, unit: features.FeatureUnit) -> bool:
         """Check whether a unit is idle (meaning it has no orders in the queue)"""
         return unit.order_length == 0
+
+    def get_distances(self, units: List[features.FeatureUnit], position: Position) -> List[float]:
+        units_xy = [(unit.x, unit.y) for unit in units]
+        return np.linalg.norm(np.array(units_xy) - np.array(position), axis=1)
+    
+    def get_closest(self, units: List[features.FeatureUnit], position: Position) -> Tuple[features.FeatureUnit, float]:
+        distances = self.get_distances(units, position)
+        min_distance = distances.min()
+        min_distances = np.where(distances == min_distance)[0]
+        # If there is only one minimum distance, that will be returned, otherwise we return one of the elements with the minimum distance
+
+        closes_unit_idx = np.random.choice(min_distances)
+        return units[closes_unit_idx], min_distance
+    
+    def select_closest_worker(self, obs: TimeStep, workers: List[features.FeatureUnit], command_centers: List[features.FeatureUnit], resources: List[features.FeatureUnit]) -> Tuple[features.FeatureUnit, features.FeatureUnit]:
+        command_center_distances = {}
+        command_center_closest_resource = {}
+        for command_center in command_centers:
+            command_center_position = Position(command_center.x, command_center.y)
+            closest_resource, distance = self.get_closest(resources, command_center_position)
+            command_center_distances[command_center.tag] = distance
+            command_center_closest_resource[command_center.tag] = closest_resource
+
+        closest_worker = None
+        shortest_distance = None
+        closest_resource = None
+        for worker in workers:
+            worker_position = Position(worker.x, worker.y)
+            closest_command_center, distance_to_command_center = self.get_closest(command_centers, worker_position)
+            distance_to_resource = command_center_distances[closest_command_center.tag]
+            total_distance = distance_to_command_center + distance_to_resource
+            if closest_worker is None:
+                closest_worker = worker
+                shortest_distance = total_distance
+                target_resource = command_center_closest_resource[closest_command_center.tag]
+            elif total_distance <= shortest_distance:
+                closest_worker = worker
+                shortest_distance = total_distance
+                target_resource = command_center_closest_resource[closest_command_center.tag]
+        
+        return closest_worker, target_resource
 
     # def select_target_enemy(self, enemies: List[Position], obs: TimeStep, **kwargs):
     #     """Given a list of enemies, selects one of them.
