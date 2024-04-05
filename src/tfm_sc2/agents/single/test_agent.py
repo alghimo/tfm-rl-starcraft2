@@ -30,7 +30,7 @@ class TestAgent(BaseAgent):
     
     @property
     def agent_actions(self) -> List[AllActions]:
-        return [AllActions.HARVEST_MINERALS]
+        return [AllActions.NO_OP, AllActions.HARVEST_MINERALS]
         return self.__agent_actions
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
@@ -45,10 +45,8 @@ class TestAgent(BaseAgent):
                 idle_workers = self.get_idle_workers(obs)
                 
                 closest_worker, closest_mineral = self.select_closest_worker(obs, idle_workers, command_centers, minerals)
-
-                import pdb
-                pdb.set_trace()
-                action_args = dict(source_unit=closest_worker, target_unit=closest_mineral)
+                action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_mineral.tag)
+            # case AllActions.BUILD_REFINERY:
             # case AllActions.COLLECT_GAS:
             # case AllActions.BUILD_REFINERY:
             # case AllActions.RECRUIT_SCV:
@@ -57,7 +55,7 @@ class TestAgent(BaseAgent):
             case _:
                 raise RuntimeError(f"Missing logic to select action args for action {action}")
         
-        return action
+        return action, action_args
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         return None

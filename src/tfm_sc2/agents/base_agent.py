@@ -24,12 +24,12 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
     _action_to_game = {
         AllActions.NO_OP: actions.RAW_FUNCTIONS.no_op,
-        AllActions.HARVEST_MINERALS: lambda scv, mineral_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", scv.tag, mineral_unit_tag),
-        AllActions.COLLECT_GAS: lambda scv, refinery_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", scv.tag, refinery_unit_tag),
-        AllActions.BUILD_REFINERY: lambda scv, geyser_position: actions.RAW_FUNCTIONS.Build_refinery_pt("now", scv.tag, geyser_position),
-        AllActions.RECRUIT_SCV: lambda command_center:actions.RAW_FUNCTIONS.Train_SCV_quick("now", command_center.tag),
-        AllActions.BUILD_SUPPLY_DEPOT: lambda scv, target_position: actions.RAW_FUNCTIONS.Build_SupplyDepot_pt("now", scv.tag, target_position),
-        AllActions.BUILD_COMMAND_CENTER: lambda scv, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", scv.tag, target_position),
+        AllActions.HARVEST_MINERALS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
+        AllActions.COLLECT_GAS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
+        AllActions.BUILD_REFINERY: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_refinery_pt("now", source_unit_tag, target_position),
+        AllActions.RECRUIT_SCV: lambda command_center_tag: actions.RAW_FUNCTIONS.Train_SCV_quick("now", command_center_tag),
+        AllActions.BUILD_SUPPLY_DEPOT: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_SupplyDepot_pt("now", source_unit_tag, target_position),
+        AllActions.BUILD_COMMAND_CENTER: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", source_unit_tag, target_position),
     }
 
     @property
@@ -51,14 +51,19 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         pass
 
     def step(self, obs: TimeStep) -> AllActions:
+        # super().step(obs)
+        # return actions.RAW_FUNCTIONS.no_op()
         obs = self.preprocess_observation(obs)
         action, action_args = self.select_action(obs)
 
-        match action_args:
-            case args if isinstance(args, dict):
-                return action(**args)
-            case _:
-                return action()
+        self.logger.info(f"Performing action {action.name} with args: {action_args}")
+        action = self._action_to_game[action]
+
+        if action_args is not None:
+            return action(**action_args)
+        
+        return action()
+                
         # return actions.RAW_FUNCTIONS.no_op()
     
     def preprocess_observation(self, obs: TimeStep) -> TimeStep:
