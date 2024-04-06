@@ -3,10 +3,13 @@ from pysc2.agents import base_agent
 from pysc2.env import sc2_env
 from pysc2.lib import actions, features
 from tfm_sc2.agents.single.test_agent import TestAgent
+from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
 
 
 def main(unused_argv):
-    agent = TestAgent()
+    map_name = "CollectMineralsAndGas"
+    map_config = MAP_CONFIGS[map_name]
+    agent = TestAgent(map_config=map_config)
     try:
         while True:
             with sc2_env.SC2Env(
@@ -15,21 +18,22 @@ def main(unused_argv):
                 #            sc2_env.Bot(sc2_env.Race.random,
                 #                        sc2_env.Difficulty.very_easy)],
                 map_name="CollectMineralsAndGas",
-                players=[sc2_env.Agent(sc2_env.Race.terran)],
-                agent_interface_format=features.AgentInterfaceFormat(
-                    feature_dimensions=features.Dimensions(screen=256, minimap=64),
-                    use_raw_units=True,
-                    use_raw_actions=True
-                    ),
-                step_mul=16,
-                game_steps_per_episode=0,
-                visualize=True) as env:
-            
+                players=map_config["players"],
+                **SC2_CONFIG) as env:
+                # agent_interface_format=features.AgentInterfaceFormat(
+                #     feature_dimensions=features.Dimensions(screen=256, minimap=64),
+                #     use_raw_units=True,
+                #     use_raw_actions=True
+                #     ),
+                # step_mul=16,
+                # game_steps_per_episode=0,
+                # visualize=True) as env:
+
                 agent.setup(env.observation_spec(), env.action_spec())
-                
+
                 timesteps = env.reset()
                 agent.reset()
-                
+
                 while True:
                     step_actions = [agent.step(timesteps[0])]
                     if timesteps[0].last():
@@ -37,7 +41,7 @@ def main(unused_argv):
                     timesteps = env.step(step_actions)
     except KeyboardInterrupt:
         pass
-  
+
 if __name__ == "__main__":
   app.run(main)
 
@@ -65,9 +69,9 @@ if __name__ == "__main__":
 
 #     if map_name not in config.MAP_CONFIGS:
 #         raise RuntimeError(f"No config for map {map_name}")
-    
+
 #     env_config = {**config.SC2_CONFIG, **config.MAP_CONFIGS[map_name]}
-    
+
 #     env_args = dict(
 #         map_name=map_name,
 #         players=[
@@ -91,8 +95,8 @@ if __name__ == "__main__":
 #         #   action_space=FLAGS.action_space,
 #           use_feature_units=True,
 #           use_raw_units=True,),
-        
-        
+
+
 #     )
 #     try:
 #         while True:
@@ -114,7 +118,7 @@ if __name__ == "__main__":
 #     app.run(main)
 #     print("SC2 runner - parsing")
 #     FLAGS = flags.FLAGS
-    
+
 #     parser = argparse.ArgumentParser(
 #         prog='SC2 runner',
 #         description='Run / train agents using PySC2'
@@ -126,7 +130,7 @@ if __name__ == "__main__":
 #             "single.test",
 #             # "single_random",
 #         ])
-    
+
 #     parser.add_argument(
 #         '--map-name',
 #         type=str,
@@ -137,7 +141,7 @@ if __name__ == "__main__":
 #         ])
 #     print("parsing args")
 #     args = parser.parse_args()
-    
+
 #     print("args type: ", type(args))
 #     print("args agent: ", args.agent)
 #     print("args map name: ", args.map_name)

@@ -32,6 +32,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         AllActions.BUILD_COMMAND_CENTER: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", source_unit_tag, target_position),
     }
 
+    def __init__(self, map_config: Dict, **kwargs):
+        super().__init__(**kwargs)
+        self._map_config = map_config
+        self._supply_depot_positions = map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
+        self._command_center_positions = map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+
+    def reset(self, **kwargs):
+        self._supply_depot_positions = self._map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
+        self._command_center_positions = self._map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+
     @property
     @abstractmethod
     def agent_actions(self) -> List[AllActions]:
@@ -42,13 +52,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         pass
         # return actions.FUNCTIONS.no_op()
 
-    @abstractmethod
-    def get_next_command_center_position(self: TimeStep) -> Position:
-        pass
+    def get_next_command_center_position(self, obs: TimeStep) -> Position:
+        return self._command_center_positions[0] if any(self._command_center_positions) else None
 
-    @abstractmethod
     def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
-        pass
+        return self._supply_depot_positions[0] if any(self._supply_depot_positions) else None
 
     def step(self, obs: TimeStep) -> AllActions:
         # super().step(obs)
@@ -272,10 +280,10 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build a supply depot")
                     return False
                 if not self.has_idle_workers(obs):
-                    if not self.has_workers(obs):
-                        self.logger.debug(f"[Action {action.name} ({action})] Player has no SCVs.")
+                    if not self.has_harvester_workers(obs):
+                        self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers or workers that are harvesting.")
                         return False
-                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle SCVs, but has other available SCVs.")
+                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers, but has workers that are harvesting.")
                 if not SC2Costs.SUPPLY_DEPOT.can_pay(obs.observation.player):
                     self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Supply Depot ({SC2Costs.SUPPLY_DEPOT})")
                     return False

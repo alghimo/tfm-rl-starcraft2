@@ -30,7 +30,7 @@ class TestAgent(BaseAgent):
 
     @property
     def agent_actions(self) -> List[AllActions]:
-        return [AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.BUILD_REFINERY, AllActions.COLLECT_GAS, AllActions.RECRUIT_SCV]
+        return [AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.BUILD_REFINERY, AllActions.COLLECT_GAS, AllActions.RECRUIT_SCV, AllActions.BUILD_SUPPLY_DEPOT]
         return self.__agent_actions
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
@@ -66,7 +66,14 @@ class TestAgent(BaseAgent):
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
                 command_centers = [cc for cc in command_centers if cc.order_length < 5]
                 action_args = dict(source_unit_tag=random.choice(command_centers).tag)
-            # case AllActions.BUILD_SUPPLY_DEPOT:
+            case AllActions.BUILD_SUPPLY_DEPOT:
+                position = self.get_next_supply_depot_position(obs)
+                workers = self.get_idle_workers(obs)
+                if len(workers) == 0:
+                    workers = self.get_harvester_workers(obs)
+
+                worker, _ = self.get_closest(workers, position)
+                action_args = dict(source_unit_tag=worker.tag, target_position=position)
             # case AllActions.BUILD_COMMAND_CENTER:
             case _:
                 raise RuntimeError(f"Missing logic to select action args for action {action}")
