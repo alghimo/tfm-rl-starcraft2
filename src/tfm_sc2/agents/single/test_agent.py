@@ -19,18 +19,18 @@ from ..base_agent import BaseAgent
 
 FUNCTIONS = actions.FUNCTIONS
 RAW_FUNCTIONS = actions.RAW_FUNCTIONS
-from ...types import Minerals
+from ...types import Gas, Minerals
 
 
 class TestAgent(BaseAgent):
-    
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.__agent_actions = list(set(list(ResourceManagerActions) + list(BaseManagerActions)))
-    
+
     @property
     def agent_actions(self) -> List[AllActions]:
-        return [AllActions.NO_OP, AllActions.HARVEST_MINERALS]
+        return [AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.BUILD_REFINERY, AllActions.COLLECT_GAS]
         return self.__agent_actions
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
@@ -43,23 +43,36 @@ class TestAgent(BaseAgent):
                 minerals = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
                 idle_workers = self.get_idle_workers(obs)
-                
+
                 closest_worker, closest_mineral = self.select_closest_worker(obs, idle_workers, command_centers, minerals)
                 action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_mineral.tag)
-            # case AllActions.BUILD_REFINERY:
-            # case AllActions.COLLECT_GAS:
-            # case AllActions.BUILD_REFINERY:
+            case AllActions.BUILD_REFINERY:
+                geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                workers = self.get_idle_workers(obs)
+                if len(workers) == 0:
+                    workers = self.get_harvester_workers(obs)
+
+                closest_worker, closest_geyser = self.select_closest_worker(obs, workers, command_centers, geysers)
+                action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_geyser.tag)
+            case AllActions.COLLECT_GAS:
+                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                idle_workers = self.get_idle_workers(obs)
+
+                closest_worker, closest_refinery = self.select_closest_worker(obs, idle_workers, command_centers, refineries)
+                action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_refinery.tag)
             # case AllActions.RECRUIT_SCV:
             # case AllActions.BUILD_SUPPLY_DEPOT:
             # case AllActions.BUILD_COMMAND_CENTER:
             case _:
                 raise RuntimeError(f"Missing logic to select action args for action {action}")
-        
+
         return action, action_args
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         return None
-    
+
     def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
         return None
 
@@ -73,7 +86,7 @@ class TestAgent(BaseAgent):
     #     import pdb
 
     #     pdb.set_trace()
-        
+
 
     #     if self.can_attack(obs):
     #         roaches = self.get_enemy_positions(obs)
