@@ -30,7 +30,7 @@ class TestAgent(BaseAgent):
 
     @property
     def agent_actions(self) -> List[AllActions]:
-        return [AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.BUILD_REFINERY, AllActions.COLLECT_GAS]
+        return [AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.BUILD_REFINERY, AllActions.COLLECT_GAS, AllActions.RECRUIT_SCV]
         return self.__agent_actions
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
@@ -62,7 +62,10 @@ class TestAgent(BaseAgent):
 
                 closest_worker, closest_refinery = self.select_closest_worker(obs, idle_workers, command_centers, refineries)
                 action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_refinery.tag)
-            # case AllActions.RECRUIT_SCV:
+            case AllActions.RECRUIT_SCV:
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                command_centers = [cc for cc in command_centers if cc.order_length < 5]
+                action_args = dict(source_unit_tag=random.choice(command_centers).tag)
             # case AllActions.BUILD_SUPPLY_DEPOT:
             # case AllActions.BUILD_COMMAND_CENTER:
             case _:

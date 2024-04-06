@@ -27,7 +27,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         AllActions.HARVEST_MINERALS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
         AllActions.COLLECT_GAS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
         AllActions.BUILD_REFINERY: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Build_Refinery_pt("now", source_unit_tag, target_unit_tag),
-        AllActions.RECRUIT_SCV: lambda command_center_tag: actions.RAW_FUNCTIONS.Train_SCV_quick("now", command_center_tag),
+        AllActions.RECRUIT_SCV: lambda source_unit_tag: actions.RAW_FUNCTIONS.Train_SCV_quick("now", source_unit_tag),
         AllActions.BUILD_SUPPLY_DEPOT: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_SupplyDepot_pt("now", source_unit_tag, target_position),
         AllActions.BUILD_COMMAND_CENTER: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", source_unit_tag, target_position),
     }
@@ -95,42 +95,43 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             self.logger.warning(f"Tried to validate action {action} that is not yet implemented in the action to game mapper: {self._action_to_game.keys()}")
             return False
 
-        def _has_target_unit(args):
-            return "target_unit" in args and isinstance(args["target_unit"], Position)
+        def _has_target_unit_tag(args):
+            return "target_unit_tag" in args and isinstance(args["target_unit_tag"], np.int64)
 
-        def _has_source_unit(args):
-            return "source_unit" in args and isinstance(args["source_unit"], Position)
+        def _has_source_unit_tag(args):
+            return "source_unit_tag" in args and isinstance(args["source_unit_tag"], np.int64)
 
         match action, action_args:
             case AllActions.NO_OP, _:
                 return True
-            case AllActions.HARVEST_MINERALS, args if _has_target_unit(args) and _has_source_unit(args):
-                self.logger.info(f"Checking action {action.name} ({action}) with source and target units")
-                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
-                if not any(command_centers):
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
-                    return False
+            # case AllActions.HARVEST_MINERALS, args if _has_target_unit_tag(args) and _has_source_unit_tag(args):
+            #     self.logger.info(f"Checking action {action.name} ({action}) with source and target units")
+            #     command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+            #     if not any(command_centers):
+            #         self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
+            #         return False
 
-                minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
-                if not any(minerals):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] There are no minerals to harvest at position {position}")
-                    return False
+            #     minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
+            #     if not any(minerals):
+            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are no minerals to harvest at position {position}")
+            #         return False
 
-                if self.has_idle_workers(obs):
-                    return True
-                # TODO Add check for workers harvesting gas
+            #     if self.has_idle_workers(obs):
+            #         return True
+            #     # TODO Add check for workers harvesting gas
 
-                self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
-                return False
-            case AllActions.HARVEST_MINERALS, args if "target_position" in args and isinstance(args["target_position"], Position):
+            #     self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
+            #     return False
+            case AllActions.HARVEST_MINERALS, args if _has_target_unit_tag(args):
+                target_unit_tag = args["target_unit_tag"]
                 self.logger.info(f"Checking action {action.name} ({action}) with position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
                 if not any(command_centers):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
                     return False
 
-                minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
-                if not any(minerals):
+                minerals = [unit.tag for unit in obs.observation.raw_units if unit.tag == target_unit_tag and Minerals.contains(unit.unit_type)]
+                if len(minerals) == 0:
                     self.logger.debug(f"[Action {action.name} ({action}) + position] There are no minerals to harvest at position {position}")
                     return False
 
@@ -161,17 +162,17 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 self.logger.debug(f"[Action {action.name} ({action}) without position] There are minerals available, but the player has no SCVs.")
                 return False
-            case AllActions.COLLECT_GAS, (position) if isinstance(position, Position):
+            case AllActions.COLLECT_GAS, args if _has_target_unit_tag(args):
+                target_unit_tag = args["target_unit_tag"]
                 self.logger.info(f"Checking action {action.name} ({action}) with position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
                 if not any(command_centers):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
                     return False
 
-                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
-                refineries = [unit.tag for unit in refineries if unit.x == position.x and unit.y == position.y]
+                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich], unit_tags=target_unit_tag)
 
-                if not any(refineries):
+                if len(refineries) == 0:
                     self.logger.debug(f"[Action {action.name} ({action}) + position] There are no refineries to harvest at position {position}")
                     return False
 
@@ -202,8 +203,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 self.logger.debug(f"[Action {action.name} ({action}) without position] There are refineries, but the player has no workers.")
                 return False
-            case AllActions.BUILD_REFINERY, (position) if isinstance(position, Position):
-                geysers = [unit.tag for unit in obs.observation.raw_units if Gas.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
+            # TODO Add this check
+            # case AllActions.BUILD_REFINERY, args if _has_source_unit_tag(args) and _has_target_unit_tag(args):
+            case AllActions.BUILD_REFINERY, args if _has_target_unit_tag(args):
+                target_unit_tag = args["target_unit_tag"]
+                geysers = [unit.tag for unit in obs.observation.raw_units if unit.tag == target_unit_tag and Gas.contains(unit.unit_type)]
                 if not any(geysers):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] There are no vespene geysers at position {position} (or they already have a structure)")
                     return False
@@ -238,9 +242,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 self.logger.debug(f"[Action {action.name} ({action}) without position] There are free vespene geysers and the player can pay the cust, but the player has no SCVs.")
                 return False
-            case AllActions.RECRUIT_SCV, (command_center_tag):
+            case AllActions.RECRUIT_SCV, args if _has_source_unit_tag(args):
+                command_center_tag = args["source_unit_tag"]
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter, unit_tags=command_center_tag)
-                if not any(command_centers):
+                command_centers = [cc for cc in command_centers if cc.order_length < 5]
+                if len(command_centers) == 0:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
                     return False
                 if command_centers[0].order_length >= 5:
@@ -251,12 +257,14 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     return False
                 return True
             case AllActions.RECRUIT_SCV, _:
+                self.logger.info(f"Checking action {action.name} ({action}) with no command center tag")
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
-                if not any(command_centers):
+                if len(command_centers) == 0:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
                     return False
+
                 for command_center in command_centers:
-                    if self.can_take(obs, action, command_center.tag):
+                    if self.can_take(obs, action, source_unit_tag=command_center.tag):
                         return True
             case AllActions.BUILD_SUPPLY_DEPOT, _:
                 target_position = self.get_next_supply_depot_position(obs)
@@ -310,7 +318,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             units = filter(lambda u: u.unit_type in unit_types, units)
 
         if unit_tags is not None:
-            unit_tags = [unit_tags] if isinstance(unit_tags, int) else unit_tags
+            unit_tags = [unit_tags] if isinstance(unit_tags, (int, np.int64, np.integer, np.int32)) else unit_tags
             units = filter(lambda u: u.tag in unit_tags, units)
 
         return list(units)
@@ -384,11 +392,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 shortest_distance = total_distance
                 target_resource = command_center_closest_resource[closest_command_center.tag]
 
-        try:
-            foo = target_resource
-        except:
-            import pdb
-            pdb.set_trace()
         return closest_worker, target_resource
 
     # def select_target_enemy(self, enemies: List[Position], obs: TimeStep, **kwargs):
