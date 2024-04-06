@@ -7,9 +7,10 @@ from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
 
 
 def main(unused_argv):
-    map_name = "CollectMineralsAndGas"
+    # map_name = "CollectMineralsAndGas"
+    map_name = "Simple64"
     map_config = MAP_CONFIGS[map_name]
-    agent = TestAgent(map_config=map_config)
+    agent = TestAgent(map_name=map_name, map_config=map_config)
     try:
         while True:
             with sc2_env.SC2Env(
@@ -17,7 +18,7 @@ def main(unused_argv):
                 #   players=[sc2_env.Agent(sc2_env.Race.zerg),
                 #            sc2_env.Bot(sc2_env.Race.random,
                 #                        sc2_env.Difficulty.very_easy)],
-                map_name="CollectMineralsAndGas",
+                map_name=map_name,
                 players=map_config["players"],
                 **SC2_CONFIG) as env:
                 # agent_interface_format=features.AgentInterfaceFormat(

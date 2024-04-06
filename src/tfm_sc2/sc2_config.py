@@ -11,7 +11,8 @@ SC2_CONFIG = dict(
                     use_raw_actions=True),
     step_mul=16,
     game_steps_per_episode=0,
-    visualize=True
+    visualize=True,
+    disable_fog=True
 )
     # players=[sc2_env.Agent(sc2_env.Race.terran),
     #          sc2_env.Bot(sc2_env.Race.random, sc2_env.Difficulty.very_easy),],
@@ -31,16 +32,34 @@ SC2_CONFIG = dict(
 MAP_CONFIGS = dict(
     Simple64=dict(
         map_name="Simple64",
+        positions={
+            "top_left": {
+                units.Terran.CommandCenter: [Position(23, 72), Position(57, 31)],
+                units.Terran.SupplyDepot:
+                    [(17, 38), (17, 36), (17, 34), (17, 32), (17, 30), (19, 29), (19, 27), (21, 27), (23, 26), (27, 26)],
+            },
+            "bottom_right": {
+                units.Terran.CommandCenter: [Position(23, 72), Position(57, 31)],
+                units.Terran.SupplyDepot:
+                    [(51, 77), (53, 77), (55, 77), (57, 76), (59, 76), (61, 75), (62, 73), (63, 71), (63, 69), (63, 67), (63, 65), ],
+            }
+        },
+        multiple_positions=True,
+        players=[
+            sc2_env.Agent(sc2_env.Race.terran),
+            sc2_env.Bot(sc2_env.Race.random, sc2_env.Difficulty.very_easy),
+        ]
     ),
     CollectMineralsAndGas=dict(
         map_name="CollectMineralsAndGas",
         positions={
             units.Terran.CommandCenter: [Position(35, 36)],
             units.Terran.SupplyDepot:
-                [(x, y) for x in range(30, 36) for y in range(29, 31)]
-                + [(x, y) for x in range(30, 36) for y in range(25, 27)]
+                [(x, y) for x in range(30, 35, 2) for y in range(29, 32, 2)]
+                + [(x, y) for x in range(30, 35, 2) for y in range(41, 44, 2)]
             ,
         },
+        multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)]
     )
 )

@@ -32,15 +32,33 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         AllActions.BUILD_COMMAND_CENTER: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", source_unit_tag, target_position),
     }
 
-    def __init__(self, map_config: Dict, **kwargs):
+    def __init__(self, map_name: str, map_config: Dict, **kwargs):
         super().__init__(**kwargs)
+        self._map_name = map_name
         self._map_config = map_config
-        self._supply_depot_positions = map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
-        self._command_center_positions = map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+        self._supply_depot_positions = None
+        self._command_center_positions = None
 
     def reset(self, **kwargs):
-        self._supply_depot_positions = self._map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
-        self._command_center_positions = self._map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+        self._supply_depot_positions = None
+        self._command_center_positions = None
+
+    def _setup_positions(self, obs: TimeStep):
+        match self._map_name:
+            case "Simple64":
+                command_center = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)[0]
+                position = "top_left" if command_center.y < 50 else "bottom_right"
+                self.logger.info(f"Map {self._map_name} - Started at '{position}' position")
+                self._supply_depot_positions = self._map_config["positions"][position].get(units.Terran.SupplyDepot, []).copy()
+                self._command_center_positions = self._map_config["positions"][position].get(units.Terran.CommandCenter, []).copy()
+            case "CollectMineralsAndGas":
+                self._supply_depot_positions = self._map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
+                self._command_center_positions = self._map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+            case _ if not self._map_config["multiple_positions"]:
+                self._supply_depot_positions = self._map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
+                self._command_center_positions = self._map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+            case _:
+                raise RuntimeError(f"Map {self._map_name} has multiple positions, but no logic to determine which positions to take")
 
     @property
     @abstractmethod
@@ -55,10 +73,18 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         return self._command_center_positions[0] if any(self._command_center_positions) else None
 
+    def take_next_command_center_position(self, obs: TimeStep) -> Position:
+        return self._command_center_positions.pop(0)
+
     def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
         return self._supply_depot_positions[0] if any(self._supply_depot_positions) else None
 
+    def take_next_supply_depot_position(self, obs: TimeStep) -> Position:
+        return self._supply_depot_positions.pop(0)
+
     def step(self, obs: TimeStep) -> AllActions:
+        if obs.first():
+            self._setup_positions(obs)
         # super().step(obs)
         # return actions.RAW_FUNCTIONS.no_op()
         obs = self.preprocess_observation(obs)
@@ -295,10 +321,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build a command center")
                     return False
                 if not self.has_idle_workers(obs):
-                    if not self.has_workers(obs):
-                        self.logger.debug(f"[Action {action.name} ({action})] Player has no SCVs.")
+                    if not self.has_harvester_workers(obs):
+                        self.logger.debug(f"[Action {action.name} ({action})] Player has no idle or harvester workers.")
                         return False
-                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle SCVs, but has other available SCVs.")
+                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers, but has workers that are harvesting.")
+
                 if not SC2Costs.COMMAND_CENTER.can_pay(obs.observation.player):
                     self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Command Center ({SC2Costs.COMMAND_CENTER})")
                     return False
