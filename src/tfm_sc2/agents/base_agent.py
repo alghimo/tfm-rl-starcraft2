@@ -152,8 +152,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 
                 if self.has_idle_workers(obs):
                     return True
-                if self.has_workers(obs):
-                    return True
+                # elif self.has_workers(obs):
+                #     return True
                 # TODO Add check for workers harvesting gas
                 
                 self.logger.debug(f"[Action {action.name} ({action}) without position] There are minerals available, but the player has no SCVs.")
@@ -193,8 +193,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 
                 if self.has_idle_workers(obs):
                     return True
-                if self.has_workers(obs):
-                    return True
+                # elif self.has_workers(obs):
+                #     return True
                 # TODO Add check for workers harvesting minerals
                 
                 self.logger.debug(f"[Action {action.name} ({action}) without position] There are refineries, but the player has no SCVs.")
@@ -209,9 +209,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] There are is a vespene geyser at position {position} but the player can't pay the cost ({SC2Costs.REFINERY})")
                     return False
 
-                if self.has_idle_workers(obs.observation.player):
+                if self.has_idle_workers(obs):
                     return True
-                elif self.has_workers(obs.observation.player):
+                elif self.has_workers(obs):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] Player has no idle SCVs, but has other available SCVs.")
                     return True
                 
@@ -227,9 +227,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     self.logger.debug(f"[Action {action.name} ({action}) without position] There are are vespene geysers available but the player can't pay the cost ({SC2Costs.REFINERY})")
                     return False
 
-                if self.has_idle_workers(obs.observation.player):
+                if self.has_idle_workers(obs):
                     return True
-                elif self.has_workers(obs.observation.player):
+                elif self.has_workers(obs):
                     self.logger.debug(f"[Action {action.name} ({action}) without position] Player has no idle SCVs, but has other available SCVs.")
                     return True
                 
@@ -260,8 +260,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 if target_position is None:
                     self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build a supply depot")
                     return False
-                if not self.has_idle_workers(obs.observation.player):
-                    if not self.has_workers(obs.observation.player):
+                if not self.has_idle_workers(obs):
+                    if not self.has_workers(obs):
                         self.logger.debug(f"[Action {action.name} ({action})] Player has no SCVs.")
                         return False
                     self.logger.debug(f"[Action {action.name} ({action})] Player has no idle SCVs, but has other available SCVs.")
@@ -275,8 +275,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 if target_position is None:
                     self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build a command center")
                     return False
-                if not self.has_idle_workers(obs.observation.player):
-                    if not self.has_workers(obs.observation.player):
+                if not self.has_idle_workers(obs):
+                    if not self.has_workers(obs):
                         self.logger.debug(f"[Action {action.name} ({action})] Player has no SCVs.")
                         return False
                     self.logger.debug(f"[Action {action.name} ({action})] Player has no idle SCVs, but has other available SCVs.")
@@ -381,6 +381,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 shortest_distance = total_distance
                 target_resource = command_center_closest_resource[closest_command_center.tag]
         
+        try:
+            foo = target_resource
+        except:
+            import pdb
+            pdb.set_trace()
         return closest_worker, target_resource
 
     # def select_target_enemy(self, enemies: List[Position], obs: TimeStep, **kwargs):
