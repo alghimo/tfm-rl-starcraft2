@@ -9,7 +9,7 @@ from pysc2.lib.features import PlayerRelative
 from pysc2.lib.named_array import NamedNumpyArray
 
 from ..actions import AllActions
-from ..constants import SC2Costs
+from ..constants import Constants, SC2Costs
 from ..types import Gas, Minerals, Position
 from ..with_logger import WithLogger
 
@@ -30,6 +30,13 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         AllActions.RECRUIT_SCV: lambda source_unit_tag: actions.RAW_FUNCTIONS.Train_SCV_quick("now", source_unit_tag),
         AllActions.BUILD_SUPPLY_DEPOT: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_SupplyDepot_pt("now", source_unit_tag, target_position),
         AllActions.BUILD_COMMAND_CENTER: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", source_unit_tag, target_position),
+        AllActions.BUILD_BARRACKS: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_Barracks_pt("now", source_unit_tag, target_position),
+        AllActions.RECRUIT_MARINE: lambda source_unit_tag: actions.RAW_FUNCTIONS.Train_Marine_quick("now", source_unit_tag),
+        AllActions.ATTACK_WITH_SINGLE_UNIT: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tag, target_unit_tag),
+        AllActions.ATTACK_WITH_SQUAD_5: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
+        AllActions.ATTACK_WITH_SQUAD_10: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
+        AllActions.ATTACK_WITH_SQUAD_15: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
+        AllActions.ATTACK_WITH_FULL_ARMY: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag)
     }
 
     def __init__(self, map_name: str, map_config: Dict, **kwargs):
@@ -38,6 +45,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._map_config = map_config
         self._supply_depot_positions = None
         self._command_center_positions = None
+        self._barrack_positions = None
 
     def reset(self, **kwargs):
         self._supply_depot_positions = None
@@ -51,14 +59,21 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 self.logger.info(f"Map {self._map_name} - Started at '{position}' position")
                 self._supply_depot_positions = self._map_config["positions"][position].get(units.Terran.SupplyDepot, []).copy()
                 self._command_center_positions = self._map_config["positions"][position].get(units.Terran.CommandCenter, []).copy()
+                self._barrack_positions = self._map_config["positions"][position].get(units.Terran.Barracks, []).copy()
             case "CollectMineralsAndGas":
                 self._supply_depot_positions = self._map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
                 self._command_center_positions = self._map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+                self._barrack_positions = self._map_config["positions"].get(units.Terran.Barracks, []).copy()
             case _ if not self._map_config["multiple_positions"]:
                 self._supply_depot_positions = self._map_config["positions"].get(units.Terran.SupplyDepot, []).copy()
                 self._command_center_positions = self._map_config["positions"].get(units.Terran.CommandCenter, []).copy()
+                self._barrack_positions = self._map_config["positions"].get(units.Terran.Barracks, []).copy()
             case _:
                 raise RuntimeError(f"Map {self._map_name} has multiple positions, but no logic to determine which positions to take")
+
+        self._supply_depot_positions = [Position(t[0], t[1]) for t in self._supply_depot_positions]
+        self._command_center_positions = [Position(t[0], t[1]) for t in self._command_center_positions]
+        self._barrack_positions = [Position(t[0], t[1]) for t in self._barrack_positions]
 
     @property
     @abstractmethod
@@ -73,18 +88,43 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         return self._command_center_positions[0] if any(self._command_center_positions) else None
 
+    def update_command_center_positions(self, obs: TimeStep) -> Position:
+        command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+        command_centers = [Position(cc.x, cc.y) for cc in command_centers]
+        self._command_center_positions = [pos for pos in self._command_center_positions if pos not in command_centers]
+
     def take_next_command_center_position(self, obs: TimeStep) -> Position:
         return self._command_center_positions.pop(0)
 
     def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
         return self._supply_depot_positions[0] if any(self._supply_depot_positions) else None
 
+    def update_supply_depot_positions(self, obs: TimeStep) -> Position:
+        supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
+        supply_depots = [Position(sd.x, sd.y) for sd in supply_depots]
+        self._supply_depot_positions = [pos for pos in self._supply_depot_positions if pos not in supply_depots]
+
     def take_next_supply_depot_position(self, obs: TimeStep) -> Position:
         return self._supply_depot_positions.pop(0)
+
+    def get_next_barracks_position(self, obs: TimeStep) -> Position:
+        return self._barrack_positions[0] if any(self._barrack_positions) else None
+
+    def update_barracks_positions(self, obs: TimeStep) -> Position:
+        barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+        barracks = [Position(b.x, b.y) for b in barracks]
+        self._barrack_positions = [pos for pos in self._barrack_positions if pos not in barracks]
+
+    def take_next_barracks_position(self, obs: TimeStep) -> Position:
+        return self._barrack_positions.pop(0)
 
     def step(self, obs: TimeStep) -> AllActions:
         if obs.first():
             self._setup_positions(obs)
+
+        self.update_supply_depot_positions(obs)
+        self.update_command_center_positions(obs)
+        self.update_barracks_positions(obs)
         # super().step(obs)
         # return actions.RAW_FUNCTIONS.no_op()
         obs = self.preprocess_observation(obs)
@@ -112,6 +152,26 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         return self._action_to_game[action](*action_args)
 
+    def get_idle_marines(self, obs: TimeStep) -> List[features.FeatureUnit]:
+        """Gets all idle workers.
+
+        Args:
+            obs (TimeStep): Observation from the environment
+
+        Returns:
+            List[features.FeatureUnit]: List of idle workers
+        """
+        self_marines = self.get_self_units(obs, units.Terran.Marine)
+        idle_marines = filter(self.is_idle, self_marines)
+
+        return list(self_marines)
+
+    def has_marines(self, obs: TimeStep) -> bool:
+        return len(self.get_self_units(obs, units.Terran.Marine)) > 0
+
+    def has_idle_marines(self, obs: TimeStep) -> bool:
+        return len(self.get_idle_marines(obs)) > 0
+
     def has_idle_workers(self, obs: TimeStep) -> bool:
         return len(self.get_idle_workers(obs)) > 0
 
@@ -134,6 +194,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         def _has_source_unit_tag(args):
             return "source_unit_tag" in args and isinstance(args["source_unit_tag"], np.int64)
+
+        def _has_source_unit_tags(args, of_length: int = None):
+            if "source_unit_tags" not in args:
+                return False
+            if any(map(lambda t: not isinstance(t, np.int64), args["source_unit_tags"])):
+                return False
+            if of_length is not None and len(args["source_unit_tags"]) != of_length:
+                return False
+
+            return True
 
         match action, action_args:
             case AllActions.NO_OP, _:
@@ -279,11 +349,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             case AllActions.RECRUIT_SCV, args if _has_source_unit_tag(args):
                 command_center_tag = args["source_unit_tag"]
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter, unit_tags=command_center_tag)
-                command_centers = [cc for cc in command_centers if cc.order_length < 5]
+                command_centers = [cc for cc in command_centers if cc.order_length < Constants.COMMAND_CENTER_QUEUE_LENGTH]
                 if len(command_centers) == 0:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
                     return False
-                if command_centers[0].order_length >= 5:
+                if command_centers[0].order_length >= Constants.COMMAND_CENTER_QUEUE_LENGTH:
                     self.logger.debug(f"[Action {action.name} ({action})] The command center has the build queue full")
                     return False
                 if not SC2Costs.SCV.can_pay(obs.observation.player):
@@ -331,6 +401,107 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     return False
 
                 return True
+            case AllActions.BUILD_BARRACKS, _:
+                target_position = self.get_next_barracks_position(obs)
+                if target_position is None:
+                    self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build barracks")
+                    return False
+                if not self.has_idle_workers(obs):
+                    if not self.has_harvester_workers(obs):
+                        self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers or workers that are harvesting.")
+                        return False
+                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers, but has workers that are harvesting.")
+                if not SC2Costs.BARRACKS.can_pay(obs.observation.player):
+                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Barrack ({SC2Costs.BARRACKS})")
+                    return False
+
+                return True
+            case AllActions.RECRUIT_MARINE, args if _has_source_unit_tag(args):
+                self.logger.info(f"Checking action {action.name} ({action}) with barracks tag")
+                barracks_tag = args["source_unit_tag"]
+                barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks, unit_tags=barracks_tag)
+                if len(barracks) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has no barracks with tag {barracks_tag}")
+                    return False
+                # TODO Review this if we ever add the option to build the reactor (queue size is increased to 8)
+                if barracks[0].order_length >= Constants.BARRACKS_QUEUE_LENGTH:
+                    self.logger.debug(f"[Action {action.name} ({action})] The barracks have the build queue full")
+                    return False
+                if not SC2Costs.MARINE.can_pay(obs.observation.player):
+                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Marine ({SC2Costs.MARINE})")
+                    return False
+                return True
+
+            case AllActions.RECRUIT_MARINE, _:
+                self.logger.info(f"Checking action {action.name} ({action}) with no barracks tag")
+                barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+                if len(barracks) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has no barracks")
+                    return False
+
+                for barrack in barracks:
+                    if self.can_take(obs, action, source_unit_tag=barrack.tag):
+                        return True
+            case AllActions.ATTACK_WITH_SINGLE_UNIT, _:
+                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                idle_marines = self.get_idle_marines(obs)
+                if len(idle_marines) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")
+                    return False
+                enemies = self.get_enemy_units(obs)
+                if len(enemies) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+                    return False
+
+                return True
+            case AllActions.ATTACK_WITH_SQUAD_5, _:
+                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                idle_marines = self.get_idle_marines(obs)
+                if len(idle_marines) < 5:
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has less than 5 idle marines")
+                    return False
+                enemies = self.get_enemy_units(obs)
+                if len(enemies) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+                    return False
+
+                return True
+            case AllActions.ATTACK_WITH_SQUAD_10, _:
+                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                idle_marines = self.get_idle_marines(obs)
+                if len(idle_marines) < 10:
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has less than 10 idle marines")
+                    return False
+                enemies = self.get_enemy_units(obs)
+                if len(enemies) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+                    return False
+
+                return True
+            case AllActions.ATTACK_WITH_SQUAD_15, _:
+                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                idle_marines = self.get_idle_marines(obs)
+                if len(idle_marines) < 15:
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has less than 15 idle marines")
+                    return False
+                enemies = self.get_enemy_units(obs)
+                if len(enemies) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+                    return False
+
+                return True
+            case AllActions.ATTACK_WITH_FULL_ARMY, _:
+                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                idle_marines = self.get_idle_marines(obs)
+                if len(idle_marines) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")
+                    return False
+                enemies = self.get_enemy_units(obs)
+                if len(enemies) == 0:
+                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+                    return False
+
+                return True
             case _:
                 self.logger.warning(f"Action {action.name} ({action}) is not implemented yet")
                 return False
@@ -344,7 +515,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                                        returned, otherwise all units are returned.
 
         Returns:
-            List[features.FeatureUnit]: _description_
+            List[features.FeatureUnit]: List of player units, filtered by unit type and/or tag if provided
         """
         units = filter(lambda u: u.alliance == PlayerRelative.SELF, obs.observation.raw_units)
 
@@ -357,6 +528,57 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             units = filter(lambda u: u.tag in unit_tags, units)
 
         return list(units)
+
+    def get_neutral_units(self, obs: TimeStep, unit_types: int | List[int] = None, unit_tags: int | List[int] = None) -> List[features.FeatureUnit]:
+        """Get a list of neutral units.
+
+        Args:
+            obs (TimeStep): Observation from the environment
+            unit_type (int | List[int], optional): Type of unit(s) to get. If provided, only units of this type(s) will be
+                                       returned, otherwise all units are returned.
+
+        Returns:
+            List[features.FeatureUnit]: List of neutral units, filtered by unit type and/or tag if provided
+        """
+        units = filter(lambda u: u.alliance == PlayerRelative.ENEMY, obs.observation.raw_units)
+
+        if unit_types is not None:
+            unit_types = [unit_types] if isinstance(unit_types, int) else unit_types
+            units = filter(lambda u: u.unit_type in unit_types, units)
+
+        if unit_tags is not None:
+            unit_tags = [unit_tags] if isinstance(unit_tags, (int, np.int64, np.integer, np.int32)) else unit_tags
+            units = filter(lambda u: u.tag in unit_tags, units)
+
+        return list(units)
+
+    def get_enemy_units(self, obs: TimeStep, unit_types: int | List[int] = None, unit_tags: int | List[int] = None) -> List[features.FeatureUnit]:
+        """Get a list of the player's enemy units.
+
+        Args:
+            obs (TimeStep): Observation from the environment
+            unit_type (int | List[int], optional): Type of unit(s) to get. If provided, only units of this type(s) will be
+                                       returned, otherwise all units are returned.
+
+        Returns:
+            List[features.FeatureUnit]: List of enemy units, filtered by unit type and/or tag if provided
+        """
+        units = filter(lambda u: u.alliance == PlayerRelative.ENEMY, obs.observation.raw_units)
+
+        if unit_types is not None:
+            unit_types = [unit_types] if isinstance(unit_types, int) else unit_types
+            units = filter(lambda u: u.unit_type in unit_types, units)
+
+        if unit_tags is not None:
+            unit_tags = [unit_tags] if isinstance(unit_tags, (int, np.int64, np.integer, np.int32)) else unit_tags
+            units = filter(lambda u: u.tag in unit_tags, units)
+
+        return list(units)
+
+    def get_enemies_info(self, obs: TimeStep) -> List[Dict]:
+        return [
+                dict(tag=e.tag, type=units.get_unit_type(e.unit_type), position=Position(e.x, e.y)) for e in self.get_enemy_units(obs)
+            ]
 
     def get_idle_workers(self, obs: TimeStep) -> List[features.FeatureUnit]:
         """Gets all idle workers.
