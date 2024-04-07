@@ -2,6 +2,12 @@ import os
 
 from pysc2.env import sc2_env
 from pysc2.lib import features, units
+from tfm_sc2.actions import (
+    AllActions,
+    ArmyRecruitManagerActions,
+    BaseManagerActions,
+    ResourceManagerActions,
+)
 
 SC2_CONFIG = dict(
     agent_interface_format=features.AgentInterfaceFormat(
@@ -51,7 +57,8 @@ MAP_CONFIGS = dict(
         players=[
             sc2_env.Agent(sc2_env.Race.terran),
             sc2_env.Bot(sc2_env.Race.random, sc2_env.Difficulty.very_easy),
-        ]
+        ],
+        available_actions=list(AllActions)
     ),
     CollectMineralsAndGas=dict(
         map_name="CollectMineralsAndGas",
@@ -63,8 +70,27 @@ MAP_CONFIGS = dict(
             ,
         },
         multiple_positions=False,
-        players=[sc2_env.Agent(sc2_env.Race.terran)]
+        players=[sc2_env.Agent(sc2_env.Race.terran)],
+        available_actions=list(set(list(ResourceManagerActions) + list(BaseManagerActions)))
+    ),
+    BuildMarines=dict(
+        map_name="BuildMarines",
+        positions={
+            # Seems like no extra CCs can be built here...
+            # units.Terran.CommandCenter: [(36, 36), (32, 41)],
+            units.Terran.CommandCenter: [],
+            units.Terran.SupplyDepot:
+                # [(x, y) for x in range(35, 38, 2) for y in range(31, 42, 2)]
+                [(42, y) for y in range(29, 44, 2)]
+                + [(x, 29) for x in range(27, 32, 2)]
+                + [(x, 43) for x in range(27, 32, 2)]
+            ,
+            # units.Terran.Barracks: [(37, y) for y in range(29, 42, 4)]
+            units.Terran.Barracks: [(36, 29), (39, 29), (36, 42), (39, 42)]# for y in range(29, 42, 4)] # (37, 29), (37, 33), (37, 37), (37, 41)
+            # units.Terran.Barracks: [(39, y) for y in range(29, 42, 4)] # (37, 29), (37, 33), (37, 37), (37, 41)
+        },
+        multiple_positions=False,
+        players=[sc2_env.Agent(sc2_env.Race.terran)],
+        available_actions=list(set(list(ResourceManagerActions) + list(BaseManagerActions) + list(ArmyRecruitManagerActions)))
     )
 )
-
-
