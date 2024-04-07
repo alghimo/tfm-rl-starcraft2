@@ -48,6 +48,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._barrack_positions = None
 
     def reset(self, **kwargs):
+        super().reset(**kwargs)
         self._supply_depot_positions = None
         self._command_center_positions = None
 
@@ -86,7 +87,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         # return actions.FUNCTIONS.no_op()
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
-        return self._command_center_positions[0] if any(self._command_center_positions) else None
+        if not any(self._command_center_positions):
+            return None
+        next_pos = self._command_center_positions.pop(0)
+        self._command_center_positions.append(next_pos)
+        return next_pos
 
     def update_command_center_positions(self, obs: TimeStep) -> Position:
         command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
@@ -97,7 +102,12 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         return self._command_center_positions.pop(0)
 
     def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
-        return self._supply_depot_positions[0] if any(self._supply_depot_positions) else None
+        if not any(self._supply_depot_positions):
+            return None
+
+        next_pos = self._supply_depot_positions.pop(0)
+        self._supply_depot_positions.append(next_pos)
+        return next_pos
 
     def update_supply_depot_positions(self, obs: TimeStep) -> Position:
         supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
@@ -108,10 +118,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         return self._supply_depot_positions.pop(0)
 
     def get_next_barracks_position(self, obs: TimeStep) -> Position:
-        return self._barrack_positions[0] if any(self._barrack_positions) else None
+        if not any(self._barrack_positions):
+            return None
+        next_pos = self._barrack_positions.pop(0)
+        self._barrack_positions.append(next_pos)
+        return next_pos
+        # return self._barrack_positions[0] if any(self._barrack_positions) else None
 
     def update_barracks_positions(self, obs: TimeStep) -> Position:
         barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+        pos_before = len(self._barrack_positions)
         barracks = [Position(b.x, b.y) for b in barracks]
         self._barrack_positions = [pos for pos in self._barrack_positions if pos not in barracks]
 
@@ -119,14 +135,14 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         return self._barrack_positions.pop(0)
 
     def step(self, obs: TimeStep) -> AllActions:
+        super().step(obs)
         if obs.first():
             self._setup_positions(obs)
 
         self.update_supply_depot_positions(obs)
         self.update_command_center_positions(obs)
         self.update_barracks_positions(obs)
-        # super().step(obs)
-        # return actions.RAW_FUNCTIONS.no_op()
+
         obs = self.preprocess_observation(obs)
         action, action_args = self.select_action(obs)
 
@@ -185,6 +201,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         if action not in self.agent_actions:
             self.logger.warning(f"Tried to validate action {action} that is not available for this agent. Allowed actions: {self.agent_actions}")
             return False
+        elif action not in self._map_config["available_actions"]:
+            self.logger.debug(f"Action {action} that is not available for this map.")
+            return False
         elif action not in self._action_to_game:
             self.logger.warning(f"Tried to validate action {action} that is not yet implemented in the action to game mapper: {self._action_to_game.keys()}")
             return False
@@ -209,7 +228,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             case AllActions.NO_OP, _:
                 return True
             # case AllActions.HARVEST_MINERALS, args if _has_target_unit_tag(args) and _has_source_unit_tag(args):
-            #     self.logger.info(f"Checking action {action.name} ({action}) with source and target units")
+            #     self.logger.debug(f"Checking action {action.name} ({action}) with source and target units")
             #     command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
             #     if not any(command_centers):
             #         self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
@@ -228,7 +247,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             #     return False
             case AllActions.HARVEST_MINERALS, args if _has_target_unit_tag(args):
                 target_unit_tag = args["target_unit_tag"]
-                self.logger.info(f"Checking action {action.name} ({action}) with position")
+                self.logger.debug(f"Checking action {action.name} ({action}) with position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
                 if not any(command_centers):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
@@ -246,7 +265,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
                 return False
             case AllActions.HARVEST_MINERALS, _:
-                self.logger.info(f"Checking action {action.name} ({action}) with no position")
+                self.logger.debug(f"Checking action {action.name} ({action}) with no position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
 
                 if not any(command_centers):
@@ -268,7 +287,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 return False
             case AllActions.COLLECT_GAS, args if _has_target_unit_tag(args):
                 target_unit_tag = args["target_unit_tag"]
-                self.logger.info(f"Checking action {action.name} ({action}) with position")
+                self.logger.debug(f"Checking action {action.name} ({action}) with position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
                 if not any(command_centers):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
@@ -287,7 +306,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
                 return False
             case AllActions.COLLECT_GAS, _:
-                self.logger.info(f"Checking action {action.name} ({action}) with no position")
+                self.logger.debug(f"Checking action {action.name} ({action}) with no position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
                 if not any(command_centers):
                     self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
@@ -361,7 +380,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     return False
                 return True
             case AllActions.RECRUIT_SCV, _:
-                self.logger.info(f"Checking action {action.name} ({action}) with no command center tag")
+                self.logger.debug(f"Checking action {action.name} ({action}) with no command center tag")
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
                 if len(command_centers) == 0:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
@@ -417,7 +436,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 return True
             case AllActions.RECRUIT_MARINE, args if _has_source_unit_tag(args):
-                self.logger.info(f"Checking action {action.name} ({action}) with barracks tag")
+                self.logger.debug(f"Checking action {action.name} ({action}) with barracks tag")
                 barracks_tag = args["source_unit_tag"]
                 barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks, unit_tags=barracks_tag)
                 if len(barracks) == 0:
@@ -433,7 +452,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 return True
 
             case AllActions.RECRUIT_MARINE, _:
-                self.logger.info(f"Checking action {action.name} ({action}) with no barracks tag")
+                self.logger.debug(f"Checking action {action.name} ({action}) with no barracks tag")
                 barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
                 if len(barracks) == 0:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has no barracks")
@@ -443,7 +462,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     if self.can_take(obs, action, source_unit_tag=barrack.tag):
                         return True
             case AllActions.ATTACK_WITH_SINGLE_UNIT, _:
-                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
                 idle_marines = self.get_idle_marines(obs)
                 if len(idle_marines) == 0:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")
@@ -455,7 +474,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 return True
             case AllActions.ATTACK_WITH_SQUAD_5, _:
-                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
                 idle_marines = self.get_idle_marines(obs)
                 if len(idle_marines) < 5:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has less than 5 idle marines")
@@ -467,7 +486,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 return True
             case AllActions.ATTACK_WITH_SQUAD_10, _:
-                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
                 idle_marines = self.get_idle_marines(obs)
                 if len(idle_marines) < 10:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has less than 10 idle marines")
@@ -479,7 +498,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 return True
             case AllActions.ATTACK_WITH_SQUAD_15, _:
-                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
                 idle_marines = self.get_idle_marines(obs)
                 if len(idle_marines) < 15:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has less than 15 idle marines")
@@ -491,7 +510,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 return True
             case AllActions.ATTACK_WITH_FULL_ARMY, _:
-                self.logger.info(f"Checking action {action.name} ({action}) without source or target unit tags")
+                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
                 idle_marines = self.get_idle_marines(obs)
                 if len(idle_marines) == 0:
                     self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")

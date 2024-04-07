@@ -14,8 +14,8 @@ class AllActions(IntEnum):
     # ArmyRecruit Manager actions
     BUILD_BARRACKS = 31
     RECRUIT_MARINE = 32
-    BUILD_TECH_LAB = 33
-    RECRUIT_DOCTOR = 34
+    # BUILD_TECH_LAB = 33
+    # RECRUIT_DOCTOR = 34
     # ArmyAttack Manager actions
 
     ATTACK_WITH_SINGLE_UNIT   = 41
@@ -45,8 +45,8 @@ class BaseManagerActions(IntEnum):
 class ArmyRecruitManagerActions(IntEnum):
     NO_OP          = AllActions.NO_OP
     RECRUIT_MARINE = AllActions.RECRUIT_MARINE
-    RECRUIT_DOCTOR = AllActions.RECRUIT_DOCTOR
-    BUILD_TECH_LAB = AllActions.BUILD_TECH_LAB
+    # RECRUIT_DOCTOR = AllActions.RECRUIT_DOCTOR
+    # BUILD_TECH_LAB = AllActions.BUILD_TECH_LAB
     BUILD_BARRACKS = AllActions.BUILD_BARRACKS
 
 class ArmyAttackManagerActions(IntEnum):
