@@ -13,7 +13,7 @@ RAW_FUNCTIONS = actions.RAW_FUNCTIONS
 from ...types import Gas, Minerals
 
 
-class SingleRandomAgent(BaseAgent):
+class SingleDQNAgent(BaseAgent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -24,8 +24,6 @@ class SingleRandomAgent(BaseAgent):
         return self.__agent_actions
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
-        import pdb
-        pdb.set_trace()
         available_actions = self.available_actions(obs)
         action = random.choice(available_actions)
 

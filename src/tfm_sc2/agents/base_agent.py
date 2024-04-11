@@ -525,7 +525,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 self.logger.warning(f"Action {action.name} ({action}) is not implemented yet")
                 return False
 
-    def get_self_units(self, obs: TimeStep, unit_types: int | List[int] = None, unit_tags: int | List[int] = None) -> List[features.FeatureUnit]:
+    def get_self_units(self, obs: TimeStep, unit_types: int | List[int] = None, unit_tags: int | List[int] = None, completed_only: bool = False) -> List[features.FeatureUnit]:
         """Get a list of the player's own units.
 
         Args:
@@ -545,6 +545,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         if unit_tags is not None:
             unit_tags = [unit_tags] if isinstance(unit_tags, (int, np.int64, np.integer, np.int32)) else unit_tags
             units = filter(lambda u: u.tag in unit_tags, units)
+
+        if completed_only:
+            units = filter(lambda u: u.build_progress == 100, units)
 
         return list(units)
 
@@ -599,6 +602,28 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 dict(tag=e.tag, type=units.get_unit_type(e.unit_type), position=Position(e.x, e.y)) for e in self.get_enemy_units(obs)
             ]
 
+    def get_workers(self, obs: TimeStep, idle: bool = False, harvesting: bool = False) -> List[features.FeatureUnit]:
+        """Gets all idle workers.
+
+        Args:
+            obs (TimeStep): Observation from the environment
+
+        Returns:
+            List[features.FeatureUnit]: List of idle workers
+        """
+        if idle and harvesting:
+            self.logger.error(f"Asking for workers that are idle AND harvesting will always result in an empty list")
+            return []
+
+        workers = self.get_self_units(obs, units.Terran.SCV)
+
+        if idle:
+            workers = filter(self.is_idle, workers)
+        elif harvesting:
+            workers = filter(lambda w: w.order_id_0 in self.HARVEST_ACTIONS, workers)
+
+        return list(workers)
+
     def get_idle_workers(self, obs: TimeStep) -> List[features.FeatureUnit]:
         """Gets all idle workers.
 
@@ -608,10 +633,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         Returns:
             List[features.FeatureUnit]: List of idle workers
         """
-        self_workers = self.get_self_units(obs, units.Terran.SCV)
-        idle_workers = filter(self.is_idle, self_workers)
-
-        return list(idle_workers)
+        return self.get_workers(obs, idle=True)
 
     def get_harvester_workers(self, obs: TimeStep) -> List[features.FeatureUnit]:
         """Get a list of all workers that are currently harvesting.
@@ -622,12 +644,18 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         Returns:
             List[features.FeatureUnit]: List of workers that are harvesting.
         """
-        all_workers = self.get_self_units(obs, units.Terran.SCV)
-        return list(filter(lambda worker: worker.order_id_0 in self.HARVEST_ACTIONS, all_workers))
+        return self.get_workers(obs, harvesting=True)
+
+    def get_free_supply(self, obs: TimeStep) -> int:
+        return obs.observation.player.food_cap - obs.observation.player.food_used
 
     def is_idle(self, unit: features.FeatureUnit) -> bool:
         """Check whether a unit is idle (meaning it has no orders in the queue)"""
         return unit.order_length == 0
+
+    def is_complete(self, unit: features.FeatureUnit) -> bool:
+        """Check whether a unit is fully build"""
+        return unit.build_progress == 100
 
     def get_distances(self, units: List[features.FeatureUnit], position: Position) -> List[float]:
         units_xy = [(unit.x, unit.y) for unit in units]
