@@ -23,161 +23,53 @@ DQNAgentParams = namedtuple('DQNAgentParams',
                             defaults=(0.1, 0.99, 0.01, 32, 0.99, None, 1, 50, "soft", 0.001))
 
 State = namedtuple('State',
-                            field_names=["epsilon", "epsilon_decay", "min_epsilon", "batch_size", "gamma", "loss", "main_network_update_frequency", "target_network_sync_frequency", "target_sync_mode", "update_tau"])
-
-# class DQNState:
-#     def from_obs(self, obs: TimeStep) -> Dict:
-#         return {
-# 			# Command Centers
-# 			"num_command_centers": len(command_centers),
-# 			"num_completed_command_centers": len(completed_command_centers),
-# 			"command_center_0_command_length": queued_scv_1,
-#             "command_center_1_command_length": queued_scv_1,
-#             "command_center_2_command_length": queued_scv_1,
-#             "command_center_3_command_length": queued_scv_1,
-#             "command_center_0_num_workers": queued_scv_1,
-#             "command_center_1_num_workers": queued_scv_1,
-#             "command_center_2_num_workers": queued_scv_1,
-#             "command_center_3_num_workers": queued_scv_1,
-# 			# SCVs
-# 			"num_workers": len(scvs),
-#             "num_workers_in_queue": 0,
-# 			"num_idle_workers": len(idle_scvs),
-#             "num_mineral_harvesters": len(mineral_harvesters),
-#             "num_gas_harvesters": len(gas_harvesters),
-# 			# TODO more stats on N workers (e.g. distance to command centers, distance to minerals, to geysers...)
-# 			# Refineries
-# 			"num_refineries": len(refineries),
-# 			"num_completed_refineries": len(completed_refineries),
-# 			# Supply Depots
-# 			"num_supply_depots": len(supply_depots),
-# 			"num_completed_supply_depots": len(completed_supply_depots),
-# 			# Barracks
-# 			"num_barracks": len(barrackses),
-# 			"num_completed_barracks": len(completed_barrackses),
-# 			# Marines
-# 			"num_marines": len(marines),
-# 			"num_marines_in_queue": queued_marines,
-# 			# Resources
-# 			"free_supply": free_supply,
-#             "minerals": minerals,
-#             "gas": gas,
-#             # Scores
-#             # Cumulative scores
-#             "score_cumulative": obs.observation.score_cumlative._index_names,
-#             "score_cumulative_score": obs.observation.score_cumulative.score,
-#             "score_cumulative_idle_production_time": obs.observation.score_cumulative.idle_production_time,
-#             "score_cumulative_idle_worker_time": obs.observation.score_cumulative.idle_worker_time,
-#             "score_cumulative_total_value_units": obs.observation.score_cumulative.total_value_units,
-#             "score_cumulative_total_value_structures": obs.observation.score_cumulative.total_value_structures,
-#             "score_cumulative_killed_value_units": obs.observation.score_cumulative.killed_value_units,
-#             "score_cumulative_killed_value_structures": obs.observation.score_cumulative.killed_value_structures,
-#             "score_cumulative_collected_minerals": obs.observation.score_cumulative.collected_minerals,
-#             "score_cumulative_collected_vespene": obs.observation.score_cumulative.collected_vespene,
-#             "score_cumulative_collection_rate_minerals": obs.observation.score_cumulative.collection_rate_minerals,
-#             "score_cumulative_collection_rate_vespene": obs.observation.score_cumulative.collection_rate_vespene,
-#             "score_cumulative_spent_minerals": obs.observation.score_cumulative.spent_minerals,
-#             "score_cumulative_spent_vespene": obs.observation.score_cumulative.spent_vespene,
-#             # Supply (food) scores
-#             "score_food_used_none": obs.observation.score_by_category.food_used.none,
-#             "score_food_used_army": obs.observation.score_by_category.food_used.army,
-#             "score_food_used_economy": obs.observation.score_by_category.food_used.economy,
-#             "score_food_used_technology": obs.observation.score_by_category.food_used.technology,
-#             "score_food_used_upgrade": obs.observation.score_by_category.food_used.upgrade,
-#             "score_by_vital": obs.observation.score_by_vital,
-#             # Killed minerals and vespene
-#             "score_killed_minerals_none": obs.observation.score_by_category.killed_minerals.none,
-#             "score_killed_minerals_army": obs.observation.score_by_category.killed_minerals.army,
-#             "score_killed_minerals_economy": obs.observation.score_by_category.killed_minerals.economy,
-#             "score_killed_minerals_technology": obs.observation.score_by_category.killed_minerals.technology,
-#             "score_killed_minerals_upgrade": obs.observation.score_by_category.killed_minerals.upgrade,
-#             "score_killed_minerals_none": obs.observation.score_by_category.killed_minerals.none,
-#             "score_killed_vespene_army": obs.observation.score_by_category.killed_vespene.army,
-#             "score_killed_vespene_economy": obs.observation.score_by_category.killed_vespene.economy,
-#             "score_killed_vespene_technology": obs.observation.score_by_category.killed_vespene.technology,
-#             "score_killed_vespene_upgrade": obs.observation.score_by_category.killed_vespene.upgrade,
-#             "score_killed_vespene_none": obs.observation.score_by_category.killed_vespene.none,
-#             # Lost minerals and vespene
-#             "score_lost_minerals_none": obs.observation.score_by_category.lost_minerals.none,
-#             "score_lost_minerals_army": obs.observation.score_by_category.lost_minerals.army,
-#             "score_lost_minerals_economy": obs.observation.score_by_category.lost_minerals.economy,
-#             "score_lost_minerals_technology": obs.observation.score_by_category.lost_minerals.technology,
-#             "score_lost_minerals_upgrade": obs.observation.score_by_category.lost_minerals.upgrade,
-#             "score_lost_minerals_none": obs.observation.score_by_category.lost_minerals.none,
-#             "score_lost_vespene_army": obs.observation.score_by_category.lost_vespene.army,
-#             "score_lost_vespene_economy": obs.observation.score_by_category.lost_vespene.economy,
-#             "score_lost_vespene_technology": obs.observation.score_by_category.lost_vespene.technology,
-#             "score_lost_vespene_upgrade": obs.observation.score_by_category.lost_vespene.upgrade,
-#             "score_lost_vespene_none": obs.observation.score_by_category.lost_vespene.none,
-#             # Friendly fire minerals and vespene
-#             "score_friendly_fire_minerals_none": obs.observation.score_by_category.friendly_fire_minerals.none,
-#             "score_friendly_fire_minerals_army": obs.observation.score_by_category.friendly_fire_minerals.army,
-#             "score_friendly_fire_minerals_economy": obs.observation.score_by_category.friendly_fire_minerals.economy,
-#             "score_friendly_fire_minerals_technology": obs.observation.score_by_category.friendly_fire_minerals.technology,
-#             "score_friendly_fire_minerals_upgrade": obs.observation.score_by_category.friendly_fire_minerals.upgrade,
-#             "score_friendly_fire_minerals_none": obs.observation.score_by_category.friendly_fire_minerals.none,
-#             "score_friendly_fire_vespene_army": obs.observation.score_by_category.friendly_fire_vespene.army,
-#             "score_friendly_fire_vespene_economy": obs.observation.score_by_category.friendly_fire_vespene.economy,
-#             "score_friendly_fire_vespene_technology": obs.observation.score_by_category.friendly_fire_vespene.technology,
-#             "score_friendly_fire_vespene_upgrade": obs.observation.score_by_category.friendly_fire_vespene.upgrade,
-#             "score_friendly_fire_vespene_none": obs.observation.score_by_category.friendly_fire_vespene.none,
-#             # Used minerals and vespene
-#             "score_used_minerals_none": obs.observation.score_by_category.used_minerals.none,
-#             "score_used_minerals_army": obs.observation.score_by_category.used_minerals.army,
-#             "score_used_minerals_economy": obs.observation.score_by_category.used_minerals.economy,
-#             "score_used_minerals_technology": obs.observation.score_by_category.used_minerals.technology,
-#             "score_used_minerals_upgrade": obs.observation.score_by_category.used_minerals.upgrade,
-#             "score_used_minerals_none": obs.observation.score_by_category.used_minerals.none,
-#             "score_used_vespene_army": obs.observation.score_by_category.usede_vespene.army,
-#             "score_used_vespene_economy": obs.observation.score_by_category.usede_vespene.economy,
-#             "score_used_vespene_technology": obs.observation.score_by_category.usede_vespene.technology,
-#             "score_used_vespene_upgrade": obs.observation.score_by_category.usede_vespene.upgrade,
-#             "score_used_vespene_none": obs.observation.score_by_category.usede_vespene.none,
-#             # Total used minerals and vespene
-#             "score_total_used_minerals_none": obs.observation.score_by_category.total_used_minerals.none,
-#             "score_total_used_minerals_army": obs.observation.score_by_category.total_used_minerals.army,
-#             "score_total_used_minerals_economy": obs.observation.score_by_category.total_used_minerals.economy,
-#             "score_total_used_minerals_technology": obs.observation.score_by_category.total_used_minerals.technology,
-#             "score_total_used_minerals_upgrade": obs.observation.score_by_category.total_used_minerals.upgrade,
-#             "score_total_used_minerals_none": obs.observation.score_by_category.total_used_minerals.none,
-#             "score_total_used_vespene_army": obs.observation.score_by_category.total_usede_vespene.army,
-#             "score_total_used_vespene_economy": obs.observation.score_by_category.total_usede_vespene.economy,
-#             "score_total_used_vespene_technology": obs.observation.score_by_category.total_usede_vespene.technology,
-#             "score_total_used_vespene_upgrade": obs.observation.score_by_category.total_usede_vespene.upgrade,
-#             "score_total_used_vespene_none": obs.observation.score_by_category.total_usede_vespene.none,
-
-#             # Score by vital
-#             "score_by_vital_total_damage_dealt": obs.observation.score_by_vital.total_damage_dealt.life,
-#             "score_by_vital_total_damage_dealt": obs.observation.score_by_vital.total_damage_dealt.shields,
-#             "score_by_vital_total_damage_dealt": obs.observation.score_by_vital.total_damage_dealt.energy,
-#             "score_by_vital_total_damage_taken": obs.observation.score_by_vital.total_damage_taken.life,
-#             "score_by_vital_total_damage_taken": obs.observation.score_by_vital.total_damage_taken.shields,
-#             "score_by_vital_total_damage_taken": obs.observation.score_by_vital.total_damage_taken.energy,
-#             "score_by_vital_total_healed": obs.observation.score_by_vital.total_healed.life,
-#             "score_by_vital_total_healed": obs.observation.score_by_vital.total_healed.shields,
-#             "score_by_vital_total_healed": obs.observation.score_by_vital.total_healed.energy,
-
-# 			# Enemy
-#             # Command Centers
-# 			"enemy_num_command_centers": len(command_centers),
-# 			"enemy_num_completed_command_centers": len(completed_command_centers),
-# 			# SCVs
-# 			"enemy_num_workers": len(scvs),
-#             # Refineries
-# 			"enemy_num_refineries": len(refineries),
-# 			# Supply Depots
-# 			"enemy_num_supply_depots": len(supply_depots),
-# 			# Barracks
-# 			"enemy_num_barracks": len(barrackses),
-# 			# Marines
-# 			"enemy_num_army_units": len(marines),
-#         }
-
+                            field_names=[
+                                # Command centers
+                                "num_command_centers", "num_completed_command_centers",
+                                "command_center_0_order_length", "command_center_1_order_length", "command_center_2_order_length", "command_center_3_order_length",
+                                "command_center_0_num_workers", "command_center_1_num_workers", "command_center_2_num_workers", "command_center_3_num_workers",
+                                # Workers
+                                "num_workers", "num_idle_workers", "num_mineral_harvesters", "num_gas_harvesters",
+                                # Buildings
+                                "num_refineries", "num_completed_refineries", "num_supply_depots", "num_completed_supply_depots", "num_barracks", "num_completed_barracks",
+                                # Army
+                                "num_marines", "num_marines_in_queue",
+                                # Resources
+                                "free_supply", "minerals", "gas",
+                                # Scores
+                                # Cumulative
+                                "score_cumulative_score", "score_cumulative_idle_production_time", "score_cumulative_idle_worker_time",
+                                "score_cumulative_total_value_units", "score_cumulative_total_value_structures", "score_cumulative_killed_value_units",
+                                "score_cumulative_killed_value_structures", "score_cumulative_collected_minerals", "score_cumulative_collected_vespene",
+                                "score_cumulative_collection_rate_minerals", "score_cumulative_collection_rate_vespene", "score_cumulative_spent_minerals",
+                                "score_cumulative_spent_vespene",
+                                # By category
+                                "score_food_used_none", "score_food_used_army", "score_food_used_economy", "score_food_used_technology", "score_food_used_upgrade", "score_by_vital",
+                                "score_killed_minerals_none", "score_killed_minerals_army", "score_killed_minerals_economy", "score_killed_minerals_technology", "score_killed_minerals_upgrade", "score_killed_minerals_none",
+                                "score_killed_vespene_army", "score_killed_vespene_economy", "score_killed_vespene_technology", "score_killed_vespene_upgrade", "score_killed_vespene_none",
+                                "score_lost_minerals_none", "score_lost_minerals_army", "score_lost_minerals_economy", "score_lost_minerals_technology", "score_lost_minerals_upgrade", "score_lost_minerals_none",
+                                "score_lost_vespene_army", "score_lost_vespene_economy", "score_lost_vespene_technology", "score_lost_vespene_upgrade", "score_lost_vespene_none",
+                                "score_friendly_fire_minerals_none", "score_friendly_fire_minerals_army", "score_friendly_fire_minerals_economy", "score_friendly_fire_minerals_technology", "score_friendly_fire_minerals_upgrade",
+                                "score_friendly_fire_vespene_none", "score_friendly_fire_vespene_army", "score_friendly_fire_vespene_economy", "score_friendly_fire_vespene_technology", "score_friendly_fire_vespene_upgrade",
+                                "score_used_minerals_none", "score_used_minerals_army", "score_used_minerals_economy", "score_used_minerals_technology", "score_used_minerals_upgrade",
+                                "score_used_vespene_none","score_used_vespene_army", "score_used_vespene_economy", "score_used_vespene_technology", "score_used_vespene_upgrade",
+                                "score_total_used_minerals_none", "score_total_used_minerals_army", "score_total_used_minerals_economy", "score_total_used_minerals_technology", "score_total_used_minerals_upgrade",
+                                "score_total_used_vespene_none", "score_total_used_vespene_army", "score_total_used_vespene_economy", "score_total_used_vespene_technology", "score_total_used_vespene_upgrade",
+                                # Score by vital
+                                "score_by_vital_total_damage_dealt_life", "score_by_vital_total_damage_dealt_shields", "score_by_vital_total_damage_dealt_energy",
+                                "score_by_vital_total_damage_taken_life", "score_by_vital_total_damage_taken_shields", "score_by_vital_total_damage_taken_energy",
+                                "score_by_vital_total_healed_life", "score_by_vital_total_healed_shields", "score_by_vital_total_healed_energy",
+                                # Neutral units
+                                "num_minerals", "num_geysers",
+                                # Enemy info
+                                "num_buildings", "total_building_health", "num_workers", "num_army_units", "total_army_health",
+                            ])
 
 class DQNAgent(BaseAgent):
     def __init__(self, main_network: DQNNetwork, buffer: ExperienceReplayBuffer,
                  hyperparams: DQNAgentParams,
-                 target_network: DQNNetwork = None
+                 target_network: DQNNetwork = None,
+                 **kwargs
                  ):
         """Deep Q-Network agent.
 
@@ -187,6 +79,7 @@ class DQNAgent(BaseAgent):
             hyperparams (DQNAgentParams): Agent hyper parameters.
             target_network (nn.Module, optional): Target network. If not provided, then the main network will be cloned.
         """
+        super().__init__(**kwargs)
 
         if torch.cuda.is_available():
             self.device = 'cuda'
@@ -203,6 +96,9 @@ class DQNAgent(BaseAgent):
         self.loss = self.hyperparams.loss or torch.nn.HuberLoss()
         # Placeholders
         self.state = None
+        self._action_to_idx = {idx: action for idx, action in enumerate(self.agent_actions)}
+        self._idx_to_action = {action: idx for idx, action in enumerate(self.agent_actions)}
+        self._num_actions = len(self.agent_actions)
 
     def initialize(self):
         # This should be exactly the same as self.steps (implemented by pysc2 base agent)
@@ -235,7 +131,7 @@ class DQNAgent(BaseAgent):
         # Last observation
         self.state = None
 
-    def _convert_obs_to_state(self, obs: TimeStep) -> torch.Tensor:
+    def _convert_obs_to_state(self, obs: TimeStep) -> State:
         def _num_complete(buildings):
             return len(list(filter(self.is_complete, buildings)))
         # info about command centers
@@ -391,46 +287,6 @@ class DQNAgent(BaseAgent):
             "score_by_vital_total_healed_shields": obs.observation.score_by_vital.total_healed.shields,
             "score_by_vital_total_healed_energy": obs.observation.score_by_vital.total_healed.energy,
         }
-        State = namedtuple('State',
-                            field_names=[
-                                # Command centers
-                                "num_command_centers", "num_completed_command_centers",
-                                "command_center_0_order_length", "command_center_1_order_length", "command_center_2_order_length", "command_center_3_order_length",
-                                "command_center_0_num_workers", "command_center_1_num_workers", "command_center_2_num_workers", "command_center_3_num_workers",
-                                # Workers
-                                "num_workers", "num_idle_workers", "num_mineral_harvesters", "num_gas_harvesters",
-                                # Buildings
-                                "num_refineries", "num_completed_refineries", "num_supply_depots", "num_completed_supply_depots", "num_barracks", "num_completed_barracks",
-                                # Army
-                                "num_marines", "num_marines_in_queue",
-                                # Resources
-                                "free_supply", "minerals", "gas",
-                                # Scores
-                                # Cumulative
-                                "score_cumulative_score", "score_cumulative_idle_production_time", "score_cumulative_idle_worker_time",
-                                "score_cumulative_total_value_units", "score_cumulative_total_value_structures", "score_cumulative_killed_value_units",
-                                "score_cumulative_killed_value_structures", "score_cumulative_collected_minerals", "score_cumulative_collected_vespene",
-                                "score_cumulative_collection_rate_minerals", "score_cumulative_collection_rate_vespene", "score_cumulative_spent_minerals",
-                                "score_cumulative_spent_vespene",
-                                # By category
-                                "score_food_used_none", "score_food_used_army", "score_food_used_economy", "score_food_used_technology", "score_food_used_upgrade", "score_by_vital",
-                                "score_killed_minerals_none", "score_killed_minerals_army", "score_killed_minerals_economy", "score_killed_minerals_technology", "score_killed_minerals_upgrade", "score_killed_minerals_none",
-                                "score_killed_vespene_army", "score_killed_vespene_economy", "score_killed_vespene_technology", "score_killed_vespene_upgrade", "score_killed_vespene_none",
-                                "score_lost_minerals_none", "score_lost_minerals_army", "score_lost_minerals_economy", "score_lost_minerals_technology", "score_lost_minerals_upgrade", "score_lost_minerals_none",
-                                "score_lost_vespene_army", "score_lost_vespene_economy", "score_lost_vespene_technology", "score_lost_vespene_upgrade", "score_lost_vespene_none",
-                                "score_friendly_fire_minerals_none", "score_friendly_fire_minerals_army", "score_friendly_fire_minerals_economy", "score_friendly_fire_minerals_technology", "score_friendly_fire_minerals_upgrade",
-                                "score_friendly_fire_vespene_none", "score_friendly_fire_vespene_army", "score_friendly_fire_vespene_economy", "score_friendly_fire_vespene_technology", "score_friendly_fire_vespene_upgrade",
-                                "score_used_minerals_none", "score_used_minerals_army", "score_used_minerals_economy", "score_used_minerals_technology", "score_used_minerals_upgrade",
-                                "score_used_vespene_none","score_used_vespene_army", "score_used_vespene_economy", "score_used_vespene_technology", "score_used_vespene_upgrade",
-                                "score_total_used_minerals_none", "score_total_used_minerals_army", "score_total_used_minerals_economy", "score_total_used_minerals_technology", "score_total_used_minerals_upgrade",
-                                "score_total_used_vespene_none", "score_total_used_vespene_army", "score_total_used_vespene_economy", "score_total_used_vespene_technology", "score_total_used_vespene_upgrade",
-                                # Score by vital
-                                "score_by_vital_total_damage_dealt_life", "score_by_vital_total_damage_dealt_shields", "score_by_vital_total_damage_dealt_energy",
-                                "score_by_vital_total_damage_taken_life", "score_by_vital_total_damage_taken_shields", "score_by_vital_total_damage_taken_energy",
-                                "score_by_vital_total_healed_life", "score_by_vital_total_healed_shields", "score_by_vital_total_healed_energy",
-                                # Neutral units
-                                "num_minerals", "num_geysers",
-                            ])
 
         # Neutral units
         minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
@@ -441,18 +297,18 @@ class DQNAgent(BaseAgent):
         )
 
         # Enemy
-
         enemy_buildings = self.get_enemy_units(obs, unit_types=Constants.BUILDING_UNIT_TYPES)
         enemy_workers = self.get_enemy_units(obs, unit_types=Constants.WORKER_UNIT_TYPES)
         enemy_army = self.get_enemy_units(obs, unit_types=Constants.ARMY_UNIT_TYPES)
 
         enemy_state = dict(
             num_buildings=len(enemy_buildings),
+            total_building_health=sum(map(lambda b: b.health, enemy_buildings)),
             num_workers=len(enemy_workers),
-            num_army = len(enemy_army),
-
+            num_army_units = len(enemy_army),
+            total_army_health=sum(map(lambda b: b.health, enemy_army)),
         )
-        return {
+        return State(
 			# Command Centers
 			**command_centers_state,
             # Workers
@@ -466,26 +322,14 @@ class DQNAgent(BaseAgent):
 			**resources_state,
             # Scores
             **scores,
-
-			# Enemy
-            # Command Centers
-			"enemy_num_command_centers": len(command_centers),
-			"enemy_num_completed_command_centers": len(completed_command_centers),
-			# SCVs
-			"enemy_num_workers": len(scvs),
-            # Refineries
-			"enemy_num_refineries": len(refineries),
-			# Supply Depots
-			"enemy_num_supply_depots": len(supply_depots),
-			# Barracks
-			"enemy_num_barracks": len(barrackses),
-			# Marines
-			"enemy_num_army_units": len(marines),
-        }
+            # Enemy
+            **enemy_state
+        )
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
         available_actions = self.available_actions(obs)
-        action = self.main_network.get_action(obs, self.hyperparams.epsilon, available_actions)
+        state = self._convert_obs_to_state(obs)
+        action = self.main_network.get_action(state, self.hyperparams.epsilon, available_actions)
 
         match action:
             case AllActions.NO_OP:
