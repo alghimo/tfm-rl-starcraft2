@@ -1,3 +1,4 @@
+import random
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Tuple
 
@@ -86,6 +87,99 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         pass
         # return actions.FUNCTIONS.no_op()
 
+    def _get_action_args(self, obs: TimeStep, action: AllActions) -> Dict[str, any]:
+        match action:
+            case AllActions.NO_OP:
+                action_args = None
+            case AllActions.HARVEST_MINERALS:
+                minerals = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                idle_workers = self.get_idle_workers(obs)
+
+                closest_worker, closest_mineral = self.select_closest_worker(obs, idle_workers, command_centers, minerals)
+                action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_mineral.tag)
+            case AllActions.BUILD_REFINERY:
+                geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                workers = self.get_idle_workers(obs)
+                if len(workers) == 0:
+                    workers = self.get_harvester_workers(obs)
+
+                closest_worker, closest_geyser = self.select_closest_worker(obs, workers, command_centers, geysers)
+                action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_geyser.tag)
+            case AllActions.COLLECT_GAS:
+                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                idle_workers = self.get_idle_workers(obs)
+
+                closest_worker, closest_refinery = self.select_closest_worker(obs, idle_workers, command_centers, refineries)
+                action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_refinery.tag)
+            case AllActions.RECRUIT_SCV:
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                command_centers = [cc for cc in command_centers if cc.order_length < Constants.COMMAND_CENTER_QUEUE_LENGTH]
+                action_args = dict(source_unit_tag=random.choice(command_centers).tag)
+            case AllActions.BUILD_SUPPLY_DEPOT:
+                position = self.get_next_supply_depot_position(obs)
+                workers = self.get_idle_workers(obs)
+                if len(workers) == 0:
+                    workers = self.get_harvester_workers(obs)
+
+                worker, _ = self.get_closest(workers, position)
+                action_args = dict(source_unit_tag=worker.tag, target_position=position)
+            case AllActions.BUILD_COMMAND_CENTER:
+                position = self.get_next_command_center_position(obs)
+                workers = self.get_idle_workers(obs)
+                if len(workers) == 0:
+                    workers = self.get_harvester_workers(obs)
+
+                worker, _ = self.get_closest(workers, position)
+                action_args = dict(source_unit_tag=worker.tag, target_position=position)
+            case AllActions.BUILD_BARRACKS:
+                position = self.get_next_barracks_position(obs)
+                workers = self.get_idle_workers(obs)
+                if len(workers) == 0:
+                    workers = self.get_harvester_workers(obs)
+
+                worker, _ = self.get_closest(workers, position)
+                action_args = dict(source_unit_tag=worker.tag, target_position=position)
+            case AllActions.RECRUIT_MARINE:
+                barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+                barracks = [cc for cc in barracks if cc.order_length < Constants.BARRACKS_QUEUE_LENGTH]
+                action_args = dict(source_unit_tag=random.choice(barracks).tag)
+            case AllActions.ATTACK_WITH_SINGLE_UNIT:
+                idle_marines = self.get_idle_marines(obs)
+                enemies = self.get_enemy_units(obs)
+                marine_tag = random.choice(idle_marines).tag
+                enemy_tag = random.choice(enemies).tag
+                action_args = dict(source_unit_tag=marine_tag, target_unit_tag=enemy_tag)
+            case AllActions.ATTACK_WITH_SQUAD_5:
+                idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                enemies = self.get_enemy_units(obs)
+                enemy_tag = random.choice(enemies).tag
+                marine_tags = random.sample(idle_marines, k=5)
+                action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
+            case AllActions.ATTACK_WITH_SQUAD_10:
+                idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                enemies = self.get_enemy_units(obs)
+                enemy_tag = random.choice(enemies).tag
+                marine_tags = random.sample(idle_marines, k=10)
+                action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
+            case AllActions.ATTACK_WITH_SQUAD_15:
+                idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                enemies = self.get_enemy_units(obs)
+                enemy_tag = random.choice(enemies).tag
+                marine_tags = random.sample(idle_marines, k=15)
+                action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
+            case AllActions.ATTACK_WITH_FULL_ARMY:
+                idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                enemies = self.get_enemy_units(obs)
+                enemy_tag = random.choice(enemies).tag
+                action_args = dict(source_unit_tags=idle_marines, target_unit_tag=enemy_tag)
+            case _:
+                raise RuntimeError(f"Missing logic to select action args for action {action}")
+
+        return action_args
+
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         if not any(self._command_center_positions):
             return None
@@ -134,7 +228,15 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def take_next_barracks_position(self, obs: TimeStep) -> Position:
         return self._barrack_positions.pop(0)
 
+    def pre_step(self, obs: TimeStep):
+        pass
+
+    def post_step(self, obs: TimeStep, action: AllActions):
+        pass
+
     def step(self, obs: TimeStep) -> AllActions:
+        self.pre_step(obs)
+
         super().step(obs)
         if obs.first():
             self._setup_positions(obs)
@@ -147,12 +249,13 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         action, action_args = self.select_action(obs)
 
         self.logger.info(f"Performing action {action.name} with args: {action_args}")
-        action = self._action_to_game[action]
+        game_action = self._action_to_game[action]
 
+        self.post_step(obs, action, action_args)
         if action_args is not None:
-            return action(**action_args)
+            return game_action(**action_args)
 
-        return action()
+        return game_action()
 
         # return actions.RAW_FUNCTIONS.no_op()
 
