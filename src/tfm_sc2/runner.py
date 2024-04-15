@@ -2,6 +2,7 @@ from absl import app, flags
 from pysc2.agents import base_agent
 from pysc2.env import sc2_env
 from pysc2.lib import actions, features
+from tfm_sc2.agents.single.single_dqn_agent import SingleDQNAgent
 from tfm_sc2.agents.single.single_random_agent import SingleRandomAgent
 from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
 
@@ -17,6 +18,9 @@ def main(unused_argv):
     match FLAGS.agent_key:
         case "single.random":
             agent = SingleRandomAgent(map_name=map_name, map_config=map_config)
+        case "single.dqn":
+            # TODO create networks, hyperparams, etc
+            agent = SingleDQNAgent(map_name=map_name, map_config=map_config)
         case _:
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:
@@ -40,6 +44,6 @@ def main(unused_argv):
         pass
 
 if __name__ == "__main__":
-    flags.DEFINE_enum("agent_key", "single.random", ["single.random"], "Agent to use.")
+    flags.DEFINE_enum("agent_key", "single.random", ["single.random", "single.dqn"], "Agent to use.")
     flags.DEFINE_enum("map_name", "Simple64", ["CollectMineralsAndGas", "Simple64", "BuildMarines"], "Map to use.")
     app.run(main)

@@ -96,24 +96,23 @@ class DQNAgent(BaseAgent):
 #         torch.nn.MSELoss()
         self.loss = self.hyperparams.loss or torch.nn.HuberLoss()
         # Placeholders
-        # self.state = None
-        self._action_to_idx = {idx: action for idx, action in enumerate(self.agent_actions)}
-        self._idx_to_action = {action: idx for idx, action in enumerate(self.agent_actions)}
-        self._num_actions = len(self.agent_actions)
+        self._action_to_idx = None
+        self._idx_to_action = None
+        self._num_actions = None
 
         self.__prev_state = None
         self.__prev_reward = None
         self.__prev_action = None
         self.__prev_action_args = None
 
-
     def initialize(self):
         # This should be exactly the same as self.steps (implemented by pysc2 base agent)
         self.__step_count = 0
+        self.__episode_count = 0
         # Loss on each update
-        self.__update_loss = []
+        self.__update_losses = []
         # Rewards at the end of each episode
-        self.__training_rewards = []
+        self.__episode_rewards = []
         # Eps value at the end of each episode
         self.__episode_eps = []
         # Mean rewards at the end of each episode
@@ -128,21 +127,24 @@ class DQNAgent(BaseAgent):
         self.__mean_steps = []
         # Highest reward for any episode
         self.__max_episode_rewards = None
-        self.__episode_reward = 0
+        self.__current_episode_reward = 0
+        self.__current_episode_steps = 0
+        self.__current_episode_losses = []
 
     def reset(self, **kwargs):
         """Initialize the agent."""
         super().reset(**kwargs)
-
-        # This should be exactly the same as self.steps (implemented by pysc2 base agent)
-        self.__step_count = 0
+        self.__episode_count += 1
         # Last observation
         self.__prev_state = None
         self.__prev_reward = None
         self.__prev_action = None
         self.__prev_action_args = None
         self.__current_state = None
-        self.__episode_reward = 0
+        self.__current_episode_reward = 0
+        # This should be exactly the same as self.steps (implemented by pysc2 base agent)
+        self.__current_episode_steps = 0
+        self.__current_episode_losses = []
 
     def _convert_obs_to_state(self, obs: TimeStep) -> State:
         building_state = self._get_buildings_state(obs)
@@ -164,310 +166,112 @@ class DQNAgent(BaseAgent):
             **enemy_state
         )
 
+    def _actions_to_network(self, actions: List[AllActions]) -> List[np.int8]:
+        """Converts a list of AllAction elements to a one-hot encoded version that the network can use.
+
+        Args:
+            actions (List[AllActions]): List of actions
+
+        Returns:
+            List[bool]: One-hot encoded version of the actions provided.
+        """
+        ohe_actions = np.zeros(self._num_actions, dtype=np.int8)
+
+        for action in actions:
+            action_idx = self._action_to_idx[action]
+            ohe_actions[action_idx] = 1
+
+
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
         available_actions = self.available_actions(obs)
-        action = self.main_network.get_action(self.__current_state, self.hyperparams.epsilon, available_actions)
+        # One-hot encoded version of available actions
+        valid_actions = self._actions_to_network(available_actions)
+        if self._is_training and (self.buffer.burn_in_capacity < 1):
+            raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
+        elif self._is_training:
+            raw_action = self.main_network.get_action(self.__current_state, eps=self.hyperparams.epsilon, valid_actions=valid_actions)
+        else:
+            raw_action = self.main_network.get_greedy_action(self.__current_state, valid_actions=valid_actions)
+
+        # Convert the "raw" action to a the right type of action
+        action = self._action_to_game[raw_action]
+
         action_args = self._get_action_args(obs=obs, action=action)
 
         return action, action_args
 
-    def step(self, obs: TimeStep):
-        action_call = super().step(obs)
-
-        num_steps += 1
-        self.__episode_reward += obs.reward
-
-        if is_training:
-            episode_losses = self.update_main_network(episode_losses)
-            self.synchronize_target_network()
-
-        if is_training:
-            # Add the episode rewards to the training rewards
-            self.training_rewards.append(episode_reward)
-            # Register the epsilon used in the last episode played
-            self.episode_eps.append(self.hyperparams.epsilon)
-            # We'll use the average loss as the episode loss
-            if any(episode_losses):
-                episode_loss = sum(episode_losses) / len(episode_losses)
-            else:
-                episode_loss = 100
-            self.episode_losses.append(episode_loss)
-            self.episode_steps.append(num_steps)
-            """
-            Get the average reward of the last episodes. Here we keep track
-            of the rolling average of the las N episodes, where N is the minimum number
-            of episodes we need to solve the environment.
-            """
-            mean_rewards = np.mean(self.training_rewards[-self.solve_num_episodes:])
-            # Also keep the rolling average of the last 10 episodes
-            mean_rewards_10 = np.mean(self.training_rewards[-10:])
-            self.mean_rewards.append(mean_rewards)
-            self.mean_rewards_10.append(mean_rewards_10)
-
-            mean_steps = np.mean(self.episode_steps[-self.solve_num_episodes:])
-            self.mean_steps.append(mean_steps)
-
-            # Check if we have a new max score
-            if self.max_episode_rewards is None or (episode_reward > self.max_episode_rewards):
-                self.max_episode_rewards = episode_reward
-
-            print(
-                f"\rEpisode {episode_number} :: "
-                + f"Mean Rewards ({self.solve_num_episodes} ep) {mean_rewards:.2f} :: "
-                + f"Mean Rewards (10ep) {mean_rewards_10:.2f} :: "
-                + f"Epsilon {self.hyperparams.epsilon:.4f} :: "
-                + f"Maxim {self.max_episode_rewards:.2f} :: "
-                + f"Steps: {num_steps}\t\t\t\t", end="")
-
-
-        return action_call
-
     def pre_step(self, obs: TimeStep):
         self.__current_state = self._convert_obs_to_state(obs)
         reward = obs.reward
-        self.__episode_reward += reward
+        self.__current_episode_reward += reward
+        self.__current_episode_steps += 1
+        # self.__current_episode_losses = []
+        # self.__episode_num_steps += 1
         self.__step_count += 1
 
-        if not obs.first():
+        if obs.first():
+            self._action_to_idx = { idx: action for idx, action in enumerate(self.agent_actions) }
+            self._idx_to_action = { action: idx for idx, action in enumerate(self.agent_actions) }
+            self._num_actions = len(self.agent_actions)
+        else:
             # do updates
             done = obs.last()
             self.buffer.append(self.__prev_state, self.__prev_action, self.__prev_action_args, reward, done, self.__current_state)
 
             if self._is_training:
-                self.__episode_losses = self.update_main_network(self.__episode_losses)
-                self.synchronize_target_network()
+                updated = False
+                if (self.__current_episode_steps % self.hyperparams.main_network_update_frequency) == 0:
+                    self.__current_episode_losses = self.update_main_network(self.__current_episode_losses)
+                    updated = True
+                if (self.__current_episode_steps % self.hyperparams.target_network_sync_frequency) == 0:
+                    self.synchronize_target_network()
                 # HERE
+
+                if done:
+                    if not updated:
+                        # If we finished but didn't update, perform one last update
+                        self.__current_episode_losses = self.update_main_network(self.__current_episode_losses)
+                    # Add the episode rewards to the training rewards
+                    self.__episode_rewards.append(self.__current_episode_reward)
+                    # Register the epsilon used in the last episode played
+                    self.__episode_eps.append(self.hyperparams.epsilon)
+                    # We'll use the average loss as the episode loss
+                    if any(self.__current_episode_losses):
+                        episode_loss = sum(self.__current_episode_losses) / len(self.__current_episode_losses)
+                    else:
+                        self.logger.error("No losses at the end of episode - meaning no updates to the main network happened")
+                        episode_loss = np.inf
+                    self.__episode_losses.append(episode_loss)
+                    self.__episode_steps.append(self.__current_episode_steps)
+                    # Get the average reward of all episodes.
+                    mean_rewards = np.mean(self.training_rewards)
+                    # Also keep the rolling average of the last 10 episodes
+                    mean_rewards_10 = np.mean(self.training_rewards[-10:])
+                    self.__mean_rewards.append(mean_rewards)
+                    self.__mean_rewards_10.append(mean_rewards_10)
+
+                    mean_steps = np.mean(self.episode_steps)
+                    self.__mean_steps.append(mean_steps)
+
+                    # Check if we have a new max score
+                    if self.__max_episode_rewards is None or (self.__current_episode_reward > self.__max_episode_rewards):
+                        self.__max_episode_rewards = self.__current_episode_reward
+
+                    print(
+                        f"\rEpisode {self.__episode_count} :: "
+                        + f"Mean Rewards ({self.__episode_count} ep) {mean_rewards:.2f} :: "
+                        + f"Mean Rewards (10ep) {mean_rewards_10:.2f} :: "
+                        + f"Epsilon {self.hyperparams.epsilon:.4f} :: "
+                        + f"Max reward {self.__max_episode_rewards:.2f} :: "
+                        + f"Episode steps: {self.__current_episode_steps} :: "
+                        + f"Total steps: {self.__step_count}\t\t\t\t", end="")
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
         self.__prev_state = self.__current_state
         self.__prev_action = action
         self.__prev_action_args = action_args
 
-
-    # def post_step(self, obs: TimeStep, action: AllActions):
-    #     self.__prev_action = action
-
-    # def step(self, obs: TimeStep) -> AllActions:
-    #     super().step(obs)
-    #     if obs.first():
-    #         self._setup_positions(obs)
-
-    #     self.update_supply_depot_positions(obs)
-    #     self.update_command_center_positions(obs)
-    #     self.update_barracks_positions(obs)
-
-    #     obs = self.preprocess_observation(obs)
-    #     action, action_args = self.select_action(obs)
-
-    #     self.logger.info(f"Performing action {action.name} with args: {action_args}")
-    #     action = self._action_to_game[action]
-
-    #     if action_args is not None:
-    #         return action(**action_args)
-
-    #     return action()
-
-
-
-
-    # def take_action(self, action: int) -> Tuple[bool, float]:
-    #     """Take an action in the environment.
-
-    #     If the episode is finished after taking the action, the environment is reset.
-
-    #     Args:
-    #         action (int): Action to take
-
-    #     Returns:
-    #         Tuple[bool, float]: A bool indicating if the episode is finished, and a float with the reward of the step.
-    #     """
-
-    #     new_state, reward, done, truncated, _ = self.env.step(action)
-    #     done = done or truncated
-
-    #     if not done:
-    #         self.buffer.append(self.state, action, reward, done, new_state)
-    #         self.state = new_state
-
-    #     if done:
-    #         self.state = self.env.reset()[0]
-
-    #     return done, reward
-
-    def take_step(self, eps: float) -> Tuple[bool, float]:
-        """Perform a step in the environment.
-
-        The action will be selected from the main network, and will have a probability
-        "eps" of taking a random action.
-
-        Args:
-            eps (float): Probability of taking a random action
-
-        Returns:
-            Tuple[bool, float]: A bool indicating if the episode is finished, and a float with the reward of the step.
-        """
-        action = self.main_network.get_action(self.state, eps)
-        done, reward = self.take_action(action)
-
-        return done, reward
-
-    def play_episode(self, episode_number: int, mode="train") -> Tuple[int, float, float]:
-        """Play a full episode.
-
-        If mode is "train", extra metrics are captured, to be used later.
-
-        Args:
-            episode_number (int): Episode number, only used for informative purposes.
-            mode (str): Set to "train" during training
-
-        Returns:
-            Tuple[int, float, float]: A tuple with (number of steps, episode reward, mean rewards of last 100 episodes)
-        """
-
-        self.state = self.env.reset()[0]
-        num_steps = 0
-        episode_reward = 0
-        done = False
-        is_training = mode == "train"
-        mean_rewards = None
-        episode_losses = []
-
-        # In not training, use an epsilon of 0
-        eps = self.hyperparams.epsilon if is_training else 0
-        while not done:
-            done, reward = self.take_step(eps)
-            self.step_count += 1
-
-            num_steps += 1
-            episode_reward += reward
-
-            if is_training:
-                episode_losses = self.update_main_network(episode_losses)
-                self.synchronize_target_network()
-
-        if is_training:
-            # Add the episode rewards to the training rewards
-            self.training_rewards.append(episode_reward)
-            # Register the epsilon used in the last episode played
-            self.episode_eps.append(self.hyperparams.epsilon)
-            # We'll use the average loss as the episode loss
-            if any(episode_losses):
-                episode_loss = sum(episode_losses) / len(episode_losses)
-            else:
-                episode_loss = 100
-            self.episode_losses.append(episode_loss)
-            self.episode_steps.append(num_steps)
-            """
-            Get the average reward of the last episodes. Here we keep track
-            of the rolling average of the las N episodes, where N is the minimum number
-            of episodes we need to solve the environment.
-            """
-            mean_rewards = np.mean(self.training_rewards[-self.solve_num_episodes:])
-            # Also keep the rolling average of the last 10 episodes
-            mean_rewards_10 = np.mean(self.training_rewards[-10:])
-            self.mean_rewards.append(mean_rewards)
-            self.mean_rewards_10.append(mean_rewards_10)
-
-            mean_steps = np.mean(self.episode_steps[-self.solve_num_episodes:])
-            self.mean_steps.append(mean_steps)
-
-            # Check if we have a new max score
-            if self.max_episode_rewards is None or (episode_reward > self.max_episode_rewards):
-                self.max_episode_rewards = episode_reward
-
-            print(
-                f"\rEpisode {episode_number} :: "
-                + f"Mean Rewards ({self.solve_num_episodes} ep) {mean_rewards:.2f} :: "
-                + f"Mean Rewards (10ep) {mean_rewards_10:.2f} :: "
-                + f"Epsilon {self.hyperparams.epsilon:.4f} :: "
-                + f"Maxim {self.max_episode_rewards:.2f} :: "
-                + f"Steps: {num_steps}\t\t\t\t", end="")
-
-        self.env.close()
-
-        return num_steps, episode_reward, mean_rewards
-
-    def train(self, max_episodes: int):
-        """Train the agent for a certain number of episodes.
-
-        Depending on the settings, the agent might stop training as soon as the environment is solved,
-        or it might continue training despite having solved it.
-
-        Args:
-            max_episodes (int): Maximum number of episodes to play.
-        """
-
-        print("Filling replay buffer...")
-        while self.buffer.burn_in_capacity < 1:
-            action = self.main_network.get_random_action()
-            self.take_action(action)
-
-        episode = 0
-        training = True
-        print("Training...")
-        max_reward = None
-
-        best_main_net = deepcopy(self.main_network)
-        best_target_net = deepcopy(self.target_network)
-        best_episode = 0
-        best_mean_rewards = -10000
-
-        solved = False
-        self.hyperparams.epsilon = self.initial_epsilon
-
-        while training:
-            # Play an episode
-            episode_steps, episode_reward, mean_rewards = self.play_episode(episode_number=episode)
-            episode += 1
-
-            # If we reached the maximum number of episodes, finish the training
-            if episode >= max_episodes:
-                training = False
-                print("\nEpisode limit reached.")
-                break
-
-            min_episodes_reached = self.solve_num_episodes <  episode
-            new_best_mean_reward = mean_rewards > best_mean_rewards
-            solve_threshold_reached = mean_rewards >= self.solve_reward_threshold
-
-            # Once the minimum number of episodes is reached, keep track of the best model
-            if min_episodes_reached and new_best_mean_reward:
-                best_main_net.load_state_dict(self.main_network.state_dict())
-                best_target_net.load_state_dict(self.target_network.state_dict())
-                best_episode = episode
-                best_mean_rewards = mean_rewards
-
-            # Check if the environment has been solved
-            if solve_threshold_reached and min_episodes_reached:
-                # We only trigger this once, in case we keep training after having solved the environment
-                if not solved:
-                    print(f'\nEnvironment solved in {episode} episodes!')
-                    solved = True
-
-                # On the other hand, if the environment is solved and we should not continue training
-                # after solving, we are done training.
-                if not self.keep_training_after_solving:
-                    training = False
-                    break
-
-            self.hyperparams.epsilon = max(self.hyperparams.epsilon * self.hyperparams.epsilon_decay, self.hyperparams.min_epsilon)
-
-        # If keep_training_after_solving is true, we restore the agent to the version
-        # that achieved the best mean rewards
-        if self.restore_to_best_version:
-            print(f"\nFinished training after {episode} episodes, restoring agent to best version at episode {best_episode}")
-            print(f"Best agent got mean rewards {best_mean_rewards:.2f} at episode {best_episode}")
-
-            self.main_network.load_state_dict(best_main_net.state_dict())
-            self.target_network.load_state_dict(best_target_net.state_dict())
-            self.training_rewards = self.training_rewards[:best_episode]
-            self.mean_rewards = self.mean_rewards[:best_episode]
-            self.mean_rewards_10 = self.mean_rewards_10[:best_episode]
-            self.episode_eps = self.episode_eps[:best_episode]
-            self.episode_losses = self.episode_losses[:best_episode]
-            self.episode_steps = self.episode_steps[:best_episode]
-
-    def calculate_loss(self, batch: Iterable[Tuple]) -> torch.Tensor:
+    def _calculate_loss(self, batch: Iterable[Tuple]) -> torch.Tensor:
         """Calculate the loss for a batch.
 
         Args:
@@ -495,7 +299,7 @@ class DQNAgent(BaseAgent):
 
         return self.loss(qvals, expected_qvals.reshape(-1,1))
 
-    def update_main_network(self, episode_losses: List[float] = None, force_update: bool = False) -> List[float]:
+    def update_main_network(self, episode_losses: List[float] = None) -> List[float]:
         """Update the main network.
 
         Normally we only perform the update every certain number of steps, defined by
@@ -503,43 +307,36 @@ class DQNAgent(BaseAgent):
         the update will happen, independently of the current step count.
 
         Args:
-            force_update (bool, optional): Force update of the network without checking the step count. Defaults to False.
+            episode_losses (List, optional): List with episode losses.
         Returns:
             List[float]: A list with all the losses in the current episode.
         """
         episode_losses = episode_losses or []
-        if (self.steps % self.hyperparams.main_network_update_frequency != 0) and not force_update:
-            return episode_losses
 
-        self.main_network.optimizer.zero_grad()  # eliminem qualsevol gradient passat
-        batch = self.buffer.sample_batch(batch_size=self.hyperparams.batch_size) # seleccionem un conjunt del buffer
+        self.main_network.optimizer.zero_grad()  # Remove previous gradients
+        batch = self.buffer.sample_batch(batch_size=self.hyperparams.batch_size) # Sample experiences from the buffer
 
-        loss = self.calculate_loss(batch)# calculem la pèrdua
-        loss.backward() # calculem la diferència per obtenir els gradients
-        self.main_network.optimizer.step() # apliquem els gradients a la xarxa neuronal
+        loss = self._calculate_loss(batch)# Get batch loss
+        loss.backward() # Backward pass to get gradients
+        self.main_network.optimizer.step() # Apply the gradients to the main network
 
         if self.device == 'cuda':
             loss = loss.detach().cpu().numpy()
         else:
             loss = loss.detach().numpy()
 
-        self.update_loss.append(loss)
+        self.__update_losses.append(loss)
         episode_losses.append(float(loss))
         return episode_losses
 
-    def synchronize_target_network(self, force_update: bool = False):
+    def synchronize_target_network(self):
         """Synchronize the target network with the main network parameters.
 
         When the target_sync_mode is set to "soft", a soft update is made, so instead of overwriting
         the target fully, we update it by mixing in the current target parameters and the main network
         parameters. In practice, we keep a fraction (1 - update_tau) from the target network, and add
         to it a fraction update_tau from the main network.
-
-        Args:
-            force_update (bool, optional): If true, the target network will be synched, no matter the step count. Defaults to False.
         """
-        if (self.steps % self.hyperparams.target_network_sync_frequency != 0) and not force_update:
-            return
 
         if self.hyperparams.target_sync_mode == "soft":
             for target_var, var in zip(self.target_network.parameters(), self.main_network.parameters()):

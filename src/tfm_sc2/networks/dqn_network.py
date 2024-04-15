@@ -60,6 +60,13 @@ class DQNNetwork(nn.Module, ABC):
         """
         return np.random.choice(self.actions)
 
+    def get_greedy_action(self, state: Union[np.ndarray, list, tuple], valid_actions: List[bool] | np.ndarray = None):
+        qvals = self.get_qvals(state)
+        # Action selected = index of the highest Q-value
+        action = torch.max(qvals, dim=-1)[1].item()
+
+        return action
+
     def get_action(self, state: Union[np.ndarray, list, tuple], epsilon: float = 0.05, valid_actions: List[bool] | np.ndarray = None) -> int:
         """Select an action using epsilon-greedy method.
 
@@ -73,9 +80,7 @@ class DQNNetwork(nn.Module, ABC):
         if np.random.random() < epsilon:
             action = self.get_random_action()
         else:
-            qvals = self.get_qvals(state)
-            # Action selected = index of the highest Q-value
-            action = torch.max(qvals, dim=-1)[1].item()
+            action = self.get_greedy_action(state=state, valid_actions=valid_actions)
 
         return action
 
