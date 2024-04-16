@@ -30,7 +30,7 @@ State = namedtuple('State',
                                 # Workers
                                 "num_workers", "num_idle_workers", "pct_idle_workers", "num_mineral_harvesters", "pct_mineral_harvesters", "num_gas_harvesters",  "pct_gas_harvesters",
                                 # Buildings
-                                "num_refineries", "num_completed_refineries", "num_supply_depots", "num_completed_supply_depots", "num_barracks", "num_completed_barracks",
+                                "num_refineries", "num_completed_refineries", "num_supply_depots", "num_completed_supply_depots", "num_barracks", "num_completed_barracks", "num_other_buildings",
                                 # Army
                                 "num_marines", "num_marines_in_queue", "num_other_army_units",
                                 # Resources
@@ -44,10 +44,10 @@ State = namedtuple('State',
                                 "score_cumulative_spent_vespene",
                                 # By category
                                 "score_food_used_none", "score_food_used_army", "score_food_used_economy", "score_food_used_technology", "score_food_used_upgrade", "score_by_vital",
-                                "score_killed_minerals_none", "score_killed_minerals_army", "score_killed_minerals_economy", "score_killed_minerals_technology", "score_killed_minerals_upgrade", "score_killed_minerals_none",
-                                "score_killed_vespene_army", "score_killed_vespene_economy", "score_killed_vespene_technology", "score_killed_vespene_upgrade", "score_killed_vespene_none",
-                                "score_lost_minerals_none", "score_lost_minerals_army", "score_lost_minerals_economy", "score_lost_minerals_technology", "score_lost_minerals_upgrade", "score_lost_minerals_none",
-                                "score_lost_vespene_army", "score_lost_vespene_economy", "score_lost_vespene_technology", "score_lost_vespene_upgrade", "score_lost_vespene_none",
+                                "score_killed_minerals_none", "score_killed_minerals_army", "score_killed_minerals_economy", "score_killed_minerals_technology", "score_killed_minerals_upgrade",
+                                "score_killed_vespene_none", "score_killed_vespene_army", "score_killed_vespene_economy", "score_killed_vespene_technology", "score_killed_vespene_upgrade",
+                                "score_lost_minerals_none", "score_lost_minerals_army", "score_lost_minerals_economy", "score_lost_minerals_technology", "score_lost_minerals_upgrade",
+                                "score_lost_vespene_none", "score_lost_vespene_army", "score_lost_vespene_economy", "score_lost_vespene_technology", "score_lost_vespene_upgrade",
                                 "score_friendly_fire_minerals_none", "score_friendly_fire_minerals_army", "score_friendly_fire_minerals_economy", "score_friendly_fire_minerals_technology", "score_friendly_fire_minerals_upgrade",
                                 "score_friendly_fire_vespene_none", "score_friendly_fire_vespene_army", "score_friendly_fire_vespene_economy", "score_friendly_fire_vespene_technology", "score_friendly_fire_vespene_upgrade",
                                 "score_used_minerals_none", "score_used_minerals_army", "score_used_minerals_economy", "score_used_minerals_technology", "score_used_minerals_upgrade",
@@ -194,7 +194,7 @@ class DQNAgent(BaseAgent):
             raw_action = self.main_network.get_greedy_action(self.__current_state, valid_actions=valid_actions)
 
         # Convert the "raw" action to a the right type of action
-        action = self._action_to_game[raw_action]
+        action = self._idx_to_action[raw_action]
 
         action_args = self._get_action_args(obs=obs, action=action)
 
@@ -210,8 +210,8 @@ class DQNAgent(BaseAgent):
         self.__step_count += 1
 
         if obs.first():
-            self._action_to_idx = { idx: action for idx, action in enumerate(self.agent_actions) }
-            self._idx_to_action = { action: idx for idx, action in enumerate(self.agent_actions) }
+            self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
+            self._action_to_idx = { action: idx for idx, action in enumerate(self.agent_actions) }
             self._num_actions = len(self.agent_actions)
         else:
             # do updates
@@ -355,12 +355,18 @@ class DQNAgent(BaseAgent):
             num_command_centers=num_command_centers,
             num_completed_command_centers=num_completed_command_centers
         )
-        for idx, cc in command_centers:
-            if idx > 3:
-                self.logger.warning(f"Observation space is only ready to consider queues and num workers for 4 command centers, but there are {num_command_centers}.")
-                break
-            command_centers_state[f"command_center_{idx}_order_length"] = cc.order_length
-            command_centers_state[f"command_center_{idx}_num_workers"] = cc.assigned_harvesters
+
+        for idx in range(4):
+            if idx >= num_command_centers:
+                order_length = -1
+                assigned_harvesters = -1
+            else:
+                cc = command_centers[idx]
+                order_length = cc.order_length
+                assigned_harvesters = cc.assigned_harvesters
+
+            command_centers_state[f"command_center_{idx}_order_length"] = order_length
+            command_centers_state[f"command_center_{idx}_num_workers"] = assigned_harvesters
 
         # Buildings
         supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
@@ -368,7 +374,7 @@ class DQNAgent(BaseAgent):
         refineries = self.get_self_units(obs, unit_types=units.Terran.Refinery)
         num_refineries = len(refineries)
         barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
-        num_barracks = len(len(barracks))
+        num_barracks = len(barracks)
         other_building_types = [
             bt for bt in Constants.BUILDING_UNIT_TYPES
             if bt not in [units.Terran.CommandCenter, units.Terran.SupplyDepot, units.Terran.Refinery, units.Terran.Barracks]
@@ -396,7 +402,7 @@ class DQNAgent(BaseAgent):
 
     def _get_workers_state(self, obs: TimeStep) -> Dict[str, int|float]:
         workers = self.get_workers(obs)
-        num_harvesters = [w for w in workers if w.order_id_0 in self.HARVEST_ACTIONS]
+        num_harvesters = len([w for w in workers if w.order_id_0 in self.HARVEST_ACTIONS])
         refineries = self.get_self_units(obs, unit_types=units.Terran.Refinery)
         num_gas_harvesters = sum(map(lambda r: r.assigned_harvesters, refineries))
         num_mineral_harvesters = num_harvesters - num_gas_harvesters
@@ -421,7 +427,7 @@ class DQNAgent(BaseAgent):
         marines = self.get_self_units(obs, unit_types=units.Terran.Marine)
         barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
         num_marines_in_queue = sum(map(lambda b: b.order_length, barracks))
-        other_army_units_types = [ut for ut in Constants.ARMY_UNIT_TYPES if ut not in units.Terran.Marine]
+        other_army_units_types = [ut for ut in Constants.ARMY_UNIT_TYPES if ut not in [units.Terran.Marine]]
         other_army_units = self.get_self_units(obs, unit_types=other_army_units_types)
         return dict(
             num_marines=len(marines),
@@ -438,7 +444,6 @@ class DQNAgent(BaseAgent):
 
     def _get_scores_state(self, obs: TimeStep)     -> Dict[str, int|float]:
         return {
-            "score_cumulative": obs.observation.score_cumlative._index_names,
             "score_cumulative_score": obs.observation.score_cumulative.score,
             "score_cumulative_idle_production_time": obs.observation.score_cumulative.idle_production_time,
             "score_cumulative_idle_worker_time": obs.observation.score_cumulative.idle_worker_time,
@@ -500,22 +505,22 @@ class DQNAgent(BaseAgent):
             "score_used_minerals_economy": obs.observation.score_by_category.used_minerals.economy,
             "score_used_minerals_technology": obs.observation.score_by_category.used_minerals.technology,
             "score_used_minerals_upgrade": obs.observation.score_by_category.used_minerals.upgrade,
-            "score_used_vespene_none": obs.observation.score_by_category.usede_vespene.none,
-            "score_used_vespene_army": obs.observation.score_by_category.usede_vespene.army,
-            "score_used_vespene_economy": obs.observation.score_by_category.usede_vespene.economy,
-            "score_used_vespene_technology": obs.observation.score_by_category.usede_vespene.technology,
-            "score_used_vespene_upgrade": obs.observation.score_by_category.usede_vespene.upgrade,
+            "score_used_vespene_none": obs.observation.score_by_category.used_vespene.none,
+            "score_used_vespene_army": obs.observation.score_by_category.used_vespene.army,
+            "score_used_vespene_economy": obs.observation.score_by_category.used_vespene.economy,
+            "score_used_vespene_technology": obs.observation.score_by_category.used_vespene.technology,
+            "score_used_vespene_upgrade": obs.observation.score_by_category.used_vespene.upgrade,
             # Total used minerals and vespene
             "score_total_used_minerals_none": obs.observation.score_by_category.total_used_minerals.none,
             "score_total_used_minerals_army": obs.observation.score_by_category.total_used_minerals.army,
             "score_total_used_minerals_economy": obs.observation.score_by_category.total_used_minerals.economy,
             "score_total_used_minerals_technology": obs.observation.score_by_category.total_used_minerals.technology,
             "score_total_used_minerals_upgrade": obs.observation.score_by_category.total_used_minerals.upgrade,
-            "score_total_used_vespene_none": obs.observation.score_by_category.total_usede_vespene.none,
-            "score_total_used_vespene_army": obs.observation.score_by_category.total_usede_vespene.army,
-            "score_total_used_vespene_economy": obs.observation.score_by_category.total_usede_vespene.economy,
-            "score_total_used_vespene_technology": obs.observation.score_by_category.total_usede_vespene.technology,
-            "score_total_used_vespene_upgrade": obs.observation.score_by_category.total_usede_vespene.upgrade,
+            "score_total_used_vespene_none": obs.observation.score_by_category.total_used_vespene.none,
+            "score_total_used_vespene_army": obs.observation.score_by_category.total_used_vespene.army,
+            "score_total_used_vespene_economy": obs.observation.score_by_category.total_used_vespene.economy,
+            "score_total_used_vespene_technology": obs.observation.score_by_category.total_used_vespene.technology,
+            "score_total_used_vespene_upgrade": obs.observation.score_by_category.total_used_vespene.upgrade,
 
             # Score by vital
             "score_by_vital_total_damage_dealt_life": obs.observation.score_by_vital.total_damage_dealt.life,

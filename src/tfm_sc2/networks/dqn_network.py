@@ -18,8 +18,8 @@ class DQNNetwork(nn.Module, ABC):
     def __init__(self, model_layers: List[nn.Module] | List[int], observation_space_shape: int, num_actions: int, learning_rate: float, **kwargs):
         super().__init__(**kwargs)
 
-        self.input_shape = None #env.observation_space.shape[0]
-        self.n_outputs = None #env.action_space.n
+        self.input_shape = observation_space_shape #env.observation_space.shape[0]
+        self.n_outputs = num_actions #env.action_space.n
         self.actions = list(range(self.n_outputs))
 
         if isinstance(model_layers[0], int):

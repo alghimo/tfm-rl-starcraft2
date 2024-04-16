@@ -55,7 +55,7 @@ class Constants:
         Protoss.RoboticsBay, Protoss.Stargate, Protoss.TemplarArchive, Protoss.TwilightCouncil, Protoss.WarpGate,
         # Legacy of the void
         Protoss.ShieldBattery,Protoss.StasisTrap
-    ],
+    ]
     ARMY_UNIT_TYPES=[
         # Terran
         # Wings of liberty
