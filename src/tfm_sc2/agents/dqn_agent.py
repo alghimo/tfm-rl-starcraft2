@@ -68,7 +68,7 @@ class DQNAgent(BaseAgent):
     def __init__(self, main_network: DQNNetwork, buffer: ExperienceReplayBuffer,
                  hyperparams: DQNAgentParams,
                  target_network: DQNNetwork = None,
-                 is_training: bool = True,
+                 train: bool = True,
                  **kwargs
                  ):
         """Deep Q-Network agent.
@@ -91,7 +91,10 @@ class DQNAgent(BaseAgent):
         self.buffer = buffer
         self.hyperparams = hyperparams
         self.initial_epsilon = hyperparams.epsilon
-        self._is_training = is_training
+        self._train = train
+        self._burn_in = True
+        self._exploit = not train
+
         self.initialize()
 #         torch.nn.MSELoss()
         self.loss = self.hyperparams.loss or torch.nn.HuberLoss()
@@ -146,6 +149,10 @@ class DQNAgent(BaseAgent):
         self.__current_episode_steps = 0
         self.__current_episode_losses = []
 
+    @property
+    def is_training(self):
+        return self._train and not self._burn_in
+
     def _convert_obs_to_state(self, obs: TimeStep) -> State:
         building_state = self._get_buildings_state(obs)
         worker_state = self._get_workers_state(obs)
@@ -181,14 +188,16 @@ class DQNAgent(BaseAgent):
             action_idx = self._action_to_idx[action]
             ohe_actions[action_idx] = 1
 
+        return ohe_actions
+
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
         available_actions = self.available_actions(obs)
         # One-hot encoded version of available actions
         valid_actions = self._actions_to_network(available_actions)
-        if self._is_training and (self.buffer.burn_in_capacity < 1):
+        if self._train and (self.buffer.burn_in_capacity < 1):
             raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
-        elif self._is_training:
+        elif self.is_training:
             raw_action = self.main_network.get_action(self.__current_state, eps=self.hyperparams.epsilon, valid_actions=valid_actions)
         else:
             raw_action = self.main_network.get_greedy_action(self.__current_state, valid_actions=valid_actions)
@@ -218,7 +227,7 @@ class DQNAgent(BaseAgent):
             done = obs.last()
             self.buffer.append(self.__prev_state, self.__prev_action, self.__prev_action_args, reward, done, self.__current_state)
 
-            if self._is_training:
+            if self.is_training:
                 updated = False
                 if (self.__current_episode_steps % self.hyperparams.main_network_update_frequency) == 0:
                     self.__current_episode_losses = self.update_main_network(self.__current_episode_losses)
