@@ -30,13 +30,14 @@ def main(unused_argv):
             learning_rate = 1e-4
             dqn = DQNNetwork(model_layers=model_layers, observation_space_shape=obs_input_shape, num_actions=num_actions, learning_rate=learning_rate)
 
-            buffer = ExperienceReplayBuffer(memory_size=50000, burn_in=5000)
+            buffer = ExperienceReplayBuffer(memory_size=1000, burn_in=100)
             agent_params = DQNAgentParams(epsilon=0.1, epsilon_decay=0.99, min_epsilon=0.01, batch_size=32, gamma=0.99, main_network_update_frequency=1, target_network_sync_frequency=50, target_sync_mode="soft", update_tau=0.01)
             agent = SingleDQNAgent(map_name=map_name, map_config=map_config, main_network=dqn, buffer=buffer, hyperparams=agent_params)
         case _:
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:
-        while True:
+        finished_episodes = 0
+        while finished_episodes < FLAGS.num_episodes:
             with sc2_env.SC2Env(
                 map_name=map_name,
                 players=map_config["players"],
@@ -46,17 +47,18 @@ def main(unused_argv):
 
                 timesteps = env.reset()
                 agent.reset()
-
-                while True:
+                episode_ended = timesteps[0].last()
+                while not episode_ended:
                     step_actions = [agent.step(timesteps[0])]
-                    if timesteps[0].last():
-                        break
                     timesteps = env.step(step_actions)
-                break
+                    episode_ended = timesteps[0].last()
+
+                finished_episodes += 1
     except KeyboardInterrupt:
         pass
 
 if __name__ == "__main__":
     flags.DEFINE_enum("agent_key", "single.random", ["single.random", "single.dqn"], "Agent to use.")
     flags.DEFINE_enum("map_name", "Simple64", ["CollectMineralsAndGas", "Simple64", "BuildMarines"], "Map to use.")
+    flags.DEFINE_integer("num_episodes", 1, "Number of episodes to play.", lower_bound=1)
     app.run(main)

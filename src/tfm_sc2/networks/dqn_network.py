@@ -22,17 +22,19 @@ class DQNNetwork(nn.Module, ABC):
         self.n_outputs = num_actions #env.action_space.n
         self.actions = list(range(self.n_outputs))
 
+        if torch.cuda.is_available():
+            self.device = 'cuda'
+        else:
+            self.device = 'cpu'
+
         if isinstance(model_layers[0], int):
             model_layers = self._get_model_layers_from_number_of_units(layer_units=model_layers, num_inputs=observation_space_shape, num_outputs=num_actions)
 
         model = torch.nn.Sequential(*model_layers)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        self.model = model
+        self.model = model.to(device=self.device)
         self.optimizer = optimizer
-        if torch.cuda.is_available():
-            self.device = 'cuda'
-        else:
-            self.device = 'cpu'
+
 
     def _get_model_layers_from_number_of_units(self, layer_units: List[int], num_inputs: int, num_outputs: int):
         layer_units = layer_units or self.DEFAULT_LAYER_UNITS
@@ -52,17 +54,18 @@ class DQNNetwork(nn.Module, ABC):
 
         return model_layers
 
-    def get_random_action(self, valid_actions: np.array = None) -> int:
+    def get_random_action(self, valid_actions: torch.Tensor = None) -> int:
         """Select a random action.
 
         Returns:
             int: Selected action
         """
         if valid_actions is not None:
-            return np.random.choice(np.where(valid_actions == 1)[0])
+            return np.random.choice(np.where(valid_actions.cpu().numpy() == 1)[0])
+
         return np.random.choice(self.actions)
 
-    def get_greedy_action(self, state: Union[np.ndarray, list, tuple], valid_actions: np.array = None):
+    def get_greedy_action(self, state: Union[np.ndarray, list, tuple], valid_actions: torch.Tensor = None):
         qvals = self.get_qvals(state)
         if valid_actions is not None:
             qvals *= valid_actions
@@ -71,7 +74,7 @@ class DQNNetwork(nn.Module, ABC):
 
         return action
 
-    def get_action(self, state: Union[np.ndarray, list, tuple], epsilon: float = 0.05, valid_actions: np.array = None) -> int:
+    def get_action(self, state: Union[np.ndarray, list, tuple], epsilon: float = 0.05, valid_actions: torch.Tensor = None) -> int:
         """Select an action using epsilon-greedy method.
 
         Args:

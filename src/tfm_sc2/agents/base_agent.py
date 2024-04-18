@@ -106,7 +106,12 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     if len(workers) == 0:
                         workers = self.get_harvester_workers(obs)
 
-                    closest_worker, closest_geyser = self.select_closest_worker(obs, workers, command_centers, geysers)
+                    if len(command_centers) == 0:
+                        # Only takes into account distance between workers and geysers
+                        closest_worker, closest_geyser = self.select_closest_worker_to_resource(obs, workers, geysers)
+                    else:
+                        # Takes into account the distance from the worker to the command center and from the command center to the geyser
+                        closest_worker, closest_geyser = self.select_closest_worker(obs, workers, command_centers, geysers)
                     action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_geyser.tag)
                 case AllActions.COLLECT_GAS:
                     refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
@@ -253,7 +258,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         obs = self.preprocess_observation(obs)
         action, action_args = self.select_action(obs)
 
-        self.logger.info(f"Performing action {action.name} with args: {action_args}")
+        self.logger.debug(f"[Step {self.steps}] Performing action {action.name} with args: {action_args}")
         game_action = self._action_to_game[action]
 
         self.post_step(obs, action, action_args)
@@ -570,6 +575,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 if not SC2Costs.MARINE.can_pay(obs.observation.player):
                     self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Marine ({SC2Costs.MARINE})")
                     return False
+
+                return True
             case AllActions.ATTACK_WITH_SINGLE_UNIT, _:
                 self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
                 idle_marines = self.get_idle_marines(obs)
@@ -779,6 +786,25 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         closes_unit_idx = np.random.choice(min_distances)
         return units[closes_unit_idx], min_distance
 
+    def select_closest_worker_to_resource(self, obs: TimeStep, workers: List[features.FeatureUnit], resources: List[features.FeatureUnit]) -> Tuple[features.FeatureUnit, features.FeatureUnit]:
+        closest_worker = None
+        shortest_distance = None
+        closest_resource = None
+        for worker in workers:
+            worker_position = Position(worker.x, worker.y)
+            closest_resource, total_distance = self.get_closest(resources, worker_position)
+
+            if closest_worker is None:
+                closest_worker = worker
+                shortest_distance = total_distance
+                target_resource = closest_resource
+            elif total_distance <= shortest_distance:
+                closest_worker = worker
+                shortest_distance = total_distance
+                target_resource = closest_resource
+
+        return closest_worker, target_resource
+
     def select_closest_worker(self, obs: TimeStep, workers: List[features.FeatureUnit], command_centers: List[features.FeatureUnit], resources: List[features.FeatureUnit]) -> Tuple[features.FeatureUnit, features.FeatureUnit]:
         command_center_distances = {}
         command_center_closest_resource = {}
@@ -804,10 +830,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 closest_worker = worker
                 shortest_distance = total_distance
                 target_resource = command_center_closest_resource[closest_command_center.tag]
-
-        if closest_worker is None or target_resource is None:
-            import pdb
-            pdb.set_trace()
 
         return closest_worker, target_resource
 

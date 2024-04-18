@@ -11,7 +11,7 @@ from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, units
 
 from ..actions import AllActions
-from ..constants import Constants
+from ..constants import Constants, SC2Costs
 from ..networks.dqn_network import DQNNetwork
 from ..networks.experience_replay_buffer import ExperienceReplayBuffer
 from ..types import Gas, Minerals
@@ -43,7 +43,7 @@ State = namedtuple('State',
                                 "score_cumulative_collection_rate_minerals", "score_cumulative_collection_rate_vespene", "score_cumulative_spent_minerals",
                                 "score_cumulative_spent_vespene",
                                 # By category
-                                "score_food_used_none", "score_food_used_army", "score_food_used_economy", "score_food_used_technology", "score_food_used_upgrade", "score_by_vital",
+                                "score_food_used_none", "score_food_used_army", "score_food_used_economy", "score_food_used_technology", "score_food_used_upgrade",
                                 "score_killed_minerals_none", "score_killed_minerals_army", "score_killed_minerals_economy", "score_killed_minerals_technology", "score_killed_minerals_upgrade",
                                 "score_killed_vespene_none", "score_killed_vespene_army", "score_killed_vespene_economy", "score_killed_vespene_technology", "score_killed_vespene_upgrade",
                                 "score_lost_minerals_none", "score_lost_minerals_army", "score_lost_minerals_economy", "score_lost_minerals_technology", "score_lost_minerals_upgrade",
@@ -92,7 +92,6 @@ class DQNAgent(BaseAgent):
         self.hyperparams = hyperparams
         self.initial_epsilon = hyperparams.epsilon
         self._train = train
-        self._burn_in = True
         self._exploit = not train
 
         self.initialize()
@@ -103,10 +102,19 @@ class DQNAgent(BaseAgent):
         self._idx_to_action = None
         self._num_actions = None
 
+        self.__current_state = None
         self.__prev_state = None
         self.__prev_reward = None
         self.__prev_action = None
         self.__prev_action_args = None
+
+        self.__flags = dict(
+            burnin_started=False,
+            train_started=False,
+            exploit_started=False,
+            main_net_updated=False,
+            target_net_updated=False,
+        )
 
     def initialize(self):
         # This should be exactly the same as self.steps (implemented by pysc2 base agent)
@@ -151,9 +159,9 @@ class DQNAgent(BaseAgent):
 
     @property
     def is_training(self):
-        return self._train and not self._burn_in
+        return self._train and (self.buffer.burn_in_capacity >= 1)
 
-    def _convert_obs_to_state(self, obs: TimeStep) -> State:
+    def _convert_obs_to_state(self, obs: TimeStep) -> torch.Tensor:
         building_state = self._get_buildings_state(obs)
         worker_state = self._get_workers_state(obs)
         army_state = self._get_army_state(obs)
@@ -163,7 +171,7 @@ class DQNAgent(BaseAgent):
         enemy_state = self._get_enemy_state(obs)
         # Enemy
 
-        return State(
+        return torch.Tensor(State(
 			**building_state,
 			**worker_state,
 			**army_state,
@@ -171,7 +179,7 @@ class DQNAgent(BaseAgent):
             **scores_state,
             **neutral_units_state,
             **enemy_state
-        )
+        )).to(device=self.device)
 
     def _actions_to_network(self, actions: List[AllActions]) -> List[np.int8]:
         """Converts a list of AllAction elements to a one-hot encoded version that the network can use.
@@ -188,18 +196,30 @@ class DQNAgent(BaseAgent):
             action_idx = self._action_to_idx[action]
             ohe_actions[action_idx] = 1
 
-        return ohe_actions
+        return torch.Tensor(ohe_actions).to(device=self.device)
 
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
         available_actions = self.available_actions(obs)
+
+        self.logger.debug(f"Available actions: {available_actions}")
         # One-hot encoded version of available actions
         valid_actions = self._actions_to_network(available_actions)
         if self._train and (self.buffer.burn_in_capacity < 1):
+            if not self.__flags["burnin_started"]:
+                self.logger.info(f"Starting burn-in")
+                self.__flags["burnin_started"] = True
+            self.logger.info(f"Burn in capacity: {100 * self.buffer.burn_in_capacity:.2f}%")
             raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
         elif self.is_training:
-            raw_action = self.main_network.get_action(self.__current_state, eps=self.hyperparams.epsilon, valid_actions=valid_actions)
+            if not self.__flags["train_started"]:
+                self.logger.info(f"Starting training")
+                self.__flags["train_started"] = True
+            raw_action = self.main_network.get_action(self.__current_state, epsilon=self.hyperparams.epsilon, valid_actions=valid_actions)
         else:
+            if not self.__flags["exploit_started"]:
+                self.logger.info(f"Starting exploit")
+                self.__flags["exploit_started"] = True
             raw_action = self.main_network.get_greedy_action(self.__current_state, valid_actions=valid_actions)
 
         # Convert the "raw" action to a the right type of action
@@ -230,9 +250,15 @@ class DQNAgent(BaseAgent):
             if self.is_training:
                 updated = False
                 if (self.__current_episode_steps % self.hyperparams.main_network_update_frequency) == 0:
+                    if not self.__flags["main_net_updated"]:
+                        self.logger.info(f"First main network update")
+                        self.__flags["main_net_updated"] = True
                     self.__current_episode_losses = self.update_main_network(self.__current_episode_losses)
                     updated = True
                 if (self.__current_episode_steps % self.hyperparams.target_network_sync_frequency) == 0:
+                    if not self.__flags["target_net_updated"]:
+                        self.logger.info(f"First target network update")
+                        self.__flags["target_net_updated"] = True
                     self.synchronize_target_network()
                 # HERE
 
@@ -277,7 +303,7 @@ class DQNAgent(BaseAgent):
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
         self.__prev_state = self.__current_state
-        self.__prev_action = action
+        self.__prev_action = self._action_to_idx[action]
         self.__prev_action_args = action_args
 
     def _calculate_loss(self, batch: Iterable[Tuple]) -> torch.Tensor:
@@ -291,17 +317,18 @@ class DQNAgent(BaseAgent):
         """
 
         # Separem les variables de l'experiència i les convertim a tensors
-        states, actions, rewards, dones, next_states = [i for i in batch]
+        states, actions, action_args, rewards, dones, next_states = [i for i in batch]
+        states = torch.stack(states).to(device=self.device)
+        next_states = torch.stack(next_states).to(device=self.device)
         rewards_vals = torch.FloatTensor(rewards).to(device=self.device)
         actions_vals = torch.LongTensor(np.array(actions)).to(device=self.device).reshape(-1,1)
-        dones_t = torch.ByteTensor(dones).to(device=self.device)
+        dones_t = torch.BoolTensor(dones).to(device=self.device)
 
         # Obtenim els valors de Q de la xarxa principal
         qvals = torch.gather(self.main_network.get_qvals(states), 1, actions_vals)
         # Obtenim els valors de Q de la xarxa objectiu
         # El paràmetre detach() evita que aquests valors actualitzin la xarxa objectiu
-        qvals_next = torch.max(self.target_network.get_qvals(next_states),
-                               dim=-1)[0].detach()
+        qvals_next = torch.max(self.target_network.get_qvals(next_states), dim=-1)[0].detach()
         qvals_next[dones_t] = 0 # 0 en estats terminals
 
         expected_qvals = self.hyperparams.gamma * qvals_next + rewards_vals
@@ -417,9 +444,9 @@ class DQNAgent(BaseAgent):
         num_mineral_harvesters = num_harvesters - num_gas_harvesters
         num_workers = len(workers)
         num_idle_workers = len([w for w in workers if self.is_idle(w)])
-        pct_idle_workers = num_idle_workers / num_workers
-        pct_mineral_harvesters = num_mineral_harvesters / num_workers
-        pct_gas_harvesters = num_gas_harvesters / num_workers
+        pct_idle_workers = 0 if num_workers == 0 else num_idle_workers / num_workers
+        pct_mineral_harvesters = 0 if num_workers == 0 else num_mineral_harvesters / num_workers
+        pct_gas_harvesters = 0 if num_workers == 0 else num_gas_harvesters / num_workers
 
         # TODO more stats on N workers (e.g. distance to command centers, distance to minerals, to geysers...)
         return dict(
@@ -472,31 +499,28 @@ class DQNAgent(BaseAgent):
             "score_food_used_economy": obs.observation.score_by_category.food_used.economy,
             "score_food_used_technology": obs.observation.score_by_category.food_used.technology,
             "score_food_used_upgrade": obs.observation.score_by_category.food_used.upgrade,
-            "score_by_vital": obs.observation.score_by_vital,
             # Killed minerals and vespene
             "score_killed_minerals_none": obs.observation.score_by_category.killed_minerals.none,
             "score_killed_minerals_army": obs.observation.score_by_category.killed_minerals.army,
             "score_killed_minerals_economy": obs.observation.score_by_category.killed_minerals.economy,
             "score_killed_minerals_technology": obs.observation.score_by_category.killed_minerals.technology,
             "score_killed_minerals_upgrade": obs.observation.score_by_category.killed_minerals.upgrade,
-            "score_killed_minerals_none": obs.observation.score_by_category.killed_minerals.none,
+            "score_killed_vespene_none": obs.observation.score_by_category.killed_vespene.none,
             "score_killed_vespene_army": obs.observation.score_by_category.killed_vespene.army,
             "score_killed_vespene_economy": obs.observation.score_by_category.killed_vespene.economy,
             "score_killed_vespene_technology": obs.observation.score_by_category.killed_vespene.technology,
             "score_killed_vespene_upgrade": obs.observation.score_by_category.killed_vespene.upgrade,
-            "score_killed_vespene_none": obs.observation.score_by_category.killed_vespene.none,
             # Lost minerals and vespene
             "score_lost_minerals_none": obs.observation.score_by_category.lost_minerals.none,
             "score_lost_minerals_army": obs.observation.score_by_category.lost_minerals.army,
             "score_lost_minerals_economy": obs.observation.score_by_category.lost_minerals.economy,
             "score_lost_minerals_technology": obs.observation.score_by_category.lost_minerals.technology,
             "score_lost_minerals_upgrade": obs.observation.score_by_category.lost_minerals.upgrade,
-            "score_lost_minerals_none": obs.observation.score_by_category.lost_minerals.none,
+            "score_lost_vespene_none": obs.observation.score_by_category.lost_vespene.none,
             "score_lost_vespene_army": obs.observation.score_by_category.lost_vespene.army,
             "score_lost_vespene_economy": obs.observation.score_by_category.lost_vespene.economy,
             "score_lost_vespene_technology": obs.observation.score_by_category.lost_vespene.technology,
             "score_lost_vespene_upgrade": obs.observation.score_by_category.lost_vespene.upgrade,
-            "score_lost_vespene_none": obs.observation.score_by_category.lost_vespene.none,
             # Friendly fire minerals and vespene
             "score_friendly_fire_minerals_none": obs.observation.score_by_category.friendly_fire_minerals.none,
             "score_friendly_fire_minerals_army": obs.observation.score_by_category.friendly_fire_minerals.army,
