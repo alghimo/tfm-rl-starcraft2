@@ -1,3 +1,4 @@
+import logging
 import random
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Tuple
@@ -48,6 +49,40 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._command_center_positions = None
         self._barrack_positions = None
 
+    def _load_agent_attrs(self, agent_attrs: Dict):
+        self._map_name = agent_attrs["map_name"]
+        self._map_config = agent_attrs["map_config"]
+        self._supply_depot_positions = agent_attrs["supply_depot_positions"]
+        self._command_center_positions = agent_attrs["command_center_positions"]
+        self._barrack_positions = agent_attrs["barrack_positions"]
+        # From SC2's Base agent
+        self.reward = agent_attrs["reward"]
+        self.episodes = agent_attrs["episodes"]
+        self.steps = agent_attrs["steps"]
+        self.obs_spec = agent_attrs["obs_spec"]
+        self.action_spec = agent_attrs["action_spec"]
+        # From WithLogger
+        self._log_name = agent_attrs["log_name"]
+        if self.logger.name != self._log_name:
+            self._logger = logging.getLogger(self._log_name)
+
+    def _get_agent_attrs(self):
+        return dict(
+            map_name=self._map_name,
+            map_config=self._map_config,
+            supply_depot_positions=self._supply_depot_positions,
+            command_center_positions=self._command_center_positions,
+            barrack_positions=self._barrack_positions,
+            # From SC2's Base agent
+            reward=self.reward,
+            episodes=self.episodes,
+            steps=self.steps,
+            obs_spec=self.obs_spec,
+            action_spec=self.action_spec,
+            # From logger
+            log_name=self._log_name,
+        )
+
     def reset(self, **kwargs):
         super().reset(**kwargs)
         self._supply_depot_positions = None
@@ -88,6 +123,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         # return actions.FUNCTIONS.no_op()
 
     def _get_action_args(self, obs: TimeStep, action: AllActions) -> Dict[str, any]:
+        is_valid = True
         try:
             match action:
                 case AllActions.NO_OP:
@@ -96,7 +132,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     minerals = [unit for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
                     command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
                     idle_workers = self.get_idle_workers(obs)
-
                     closest_worker, closest_mineral = self.select_closest_worker(obs, idle_workers, command_centers, minerals)
                     action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_mineral.tag)
                 case AllActions.BUILD_REFINERY:
@@ -184,11 +219,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 case _:
                     raise RuntimeError(f"Missing logic to select action args for action {action}")
 
-            return action_args
+            return action_args, True
         except:
-            print(f"Error getting args for {action}")
-            import pdb
-            pdb.set_trace()
+            return None, False
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         if not any(self._command_center_positions):
@@ -241,7 +274,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def pre_step(self, obs: TimeStep):
         pass
 
-    def post_step(self, obs: TimeStep, action: AllActions):
+    def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
         pass
 
     def step(self, obs: TimeStep) -> AllActions:
@@ -266,8 +299,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             return game_action(**action_args)
 
         return game_action()
-
-        # return actions.RAW_FUNCTIONS.no_op()
 
     def preprocess_observation(self, obs: TimeStep) -> TimeStep:
         return obs

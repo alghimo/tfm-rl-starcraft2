@@ -24,10 +24,12 @@ class SingleRandomAgent(BaseAgent):
         return self.__agent_actions
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
-        import pdb
-        pdb.set_trace()
         available_actions = self.available_actions(obs)
         action = random.choice(available_actions)
-        action_args = self._get_action_args(obs=obs, action=action)
+        action_args, is_valid_action = self._get_action_args(obs=obs, action=action)
+
+        if not is_valid_action:
+            self.logger.warning(f"Action {action.name} is not valid anymore, returning NO_OP")
+            return AllActions.NO_OP, None
 
         return action, action_args
