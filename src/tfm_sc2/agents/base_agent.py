@@ -48,6 +48,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._supply_depot_positions = None
         self._command_center_positions = None
         self._barrack_positions = None
+        self._used_supply_depot_positions = None
+        self._used_command_center_positions = None
+        self._used_barrack_positions = None
 
     def _load_agent_attrs(self, agent_attrs: Dict):
         self._map_name = agent_attrs["map_name"]
@@ -55,6 +58,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._supply_depot_positions = agent_attrs["supply_depot_positions"]
         self._command_center_positions = agent_attrs["command_center_positions"]
         self._barrack_positions = agent_attrs["barrack_positions"]
+        self._used_supply_depot_positions = agent_attrs["used_supply_depot_positions"]
+        self._used_command_center_positions = agent_attrs["used_command_center_positions"]
+        self._used_barrack_positions = agent_attrs["used_barrack_positions"]
         # From SC2's Base agent
         self.reward = agent_attrs["reward"]
         self.episodes = agent_attrs["episodes"]
@@ -71,6 +77,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             map_name=self._map_name,
             map_config=self._map_config,
             supply_depot_positions=self._supply_depot_positions,
+            used_supply_depot_positions=self._used_supply_depot_positions,
+            used_command_center_positions=self._used_command_center_positions,
+            used_barrack_positions=self._used_barrack_positions,
             command_center_positions=self._command_center_positions,
             barrack_positions=self._barrack_positions,
             # From SC2's Base agent
@@ -86,7 +95,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def reset(self, **kwargs):
         super().reset(**kwargs)
         self._supply_depot_positions = None
+        self._barrack_positions = None
         self._command_center_positions = None
+        self._used_supply_depot_positions = None
+        self._used_command_center_positions = None
+        self._used_barrack_positions = None
 
     def _setup_positions(self, obs: TimeStep):
         match self._map_name:
@@ -224,52 +237,61 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             return None, False
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
-        if not any(self._command_center_positions):
-            return None
-        next_pos = self._command_center_positions.pop(0)
-        self._command_center_positions.append(next_pos)
+        next_pos = None
+        for idx, candidate_position in enumerate(self._command_center_positions):
+            if candidate_position not in self._used_command_center_positions:
+                next_pos = candidate_position
+                break
+
+        if next_pos is not None:
+            # put all positions before the candidate position at the end
+            self._command_center_positions = self._command_center_positions[idx + 1:] + self._command_center_positions[:idx+1]
+
         return next_pos
 
     def update_command_center_positions(self, obs: TimeStep) -> Position:
         command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
-        command_centers = [Position(cc.x, cc.y) for cc in command_centers]
-        self._command_center_positions = [pos for pos in self._command_center_positions if pos not in command_centers]
-
-    def take_next_command_center_position(self, obs: TimeStep) -> Position:
-        return self._command_center_positions.pop(0)
+        command_center_positions = [Position(cc.x, cc.y) for cc in command_centers]
+        self._used_command_center_positions = command_center_positions
+        self._command_center_positions = [pos for pos in self._command_center_positions if pos not in command_center_positions]
 
     def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
-        if not any(self._supply_depot_positions):
-            return None
+        next_pos = None
+        for idx, candidate_position in enumerate(self._supply_depot_positions):
+            if candidate_position not in self._used_supply_depot_positions:
+                next_pos = candidate_position
+                break
 
-        next_pos = self._supply_depot_positions.pop(0)
-        self._supply_depot_positions.append(next_pos)
+        if next_pos is not None:
+            # put all positions before the candidate position at the end
+            self._supply_depot_positions = self._supply_depot_positions[idx + 1:] + self._supply_depot_positions[:idx+1]
+
         return next_pos
 
     def update_supply_depot_positions(self, obs: TimeStep) -> Position:
         supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
-        supply_depots = [Position(sd.x, sd.y) for sd in supply_depots]
-        self._supply_depot_positions = [pos for pos in self._supply_depot_positions if pos not in supply_depots]
-
-    def take_next_supply_depot_position(self, obs: TimeStep) -> Position:
-        return self._supply_depot_positions.pop(0)
+        supply_depots_positions = [Position(sd.x, sd.y) for sd in supply_depots]
+        self._used_supply_depot_positions = supply_depots_positions
+        self._supply_depot_positions = [pos for pos in self._supply_depot_positions if pos not in supply_depots_positions]
 
     def get_next_barracks_position(self, obs: TimeStep) -> Position:
-        if not any(self._barrack_positions):
-            return None
-        next_pos = self._barrack_positions.pop(0)
-        self._barrack_positions.append(next_pos)
+        next_pos = None
+        for idx, candidate_position in enumerate(self._barrack_positions):
+            if candidate_position not in self._used_barrack_positions:
+                next_pos = candidate_position
+                break
+
+        if next_pos is not None:
+            # put all positions before the candidate position at the end
+            self._barrack_positions = self._barrack_positions[idx + 1:] + self._barrack_positions[:idx+1]
+
         return next_pos
-        # return self._barrack_positions[0] if any(self._barrack_positions) else None
 
     def update_barracks_positions(self, obs: TimeStep) -> Position:
         barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
-        pos_before = len(self._barrack_positions)
-        barracks = [Position(b.x, b.y) for b in barracks]
-        self._barrack_positions = [pos for pos in self._barrack_positions if pos not in barracks]
-
-    def take_next_barracks_position(self, obs: TimeStep) -> Position:
-        return self._barrack_positions.pop(0)
+        barrack_positions = [Position(b.x, b.y) for b in barracks]
+        self._used_barrack_positions = barrack_positions
+        self._barrack_positions = [pos for pos in self._supply_depot_positions if pos not in barrack_positions]
 
     def pre_step(self, obs: TimeStep):
         pass
