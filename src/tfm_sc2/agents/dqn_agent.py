@@ -473,8 +473,6 @@ class DQNAgent(BaseAgent):
 
         self.__current_episode_reward += reward
         self.__current_episode_steps += 1
-        # self.__current_episode_losses = []
-        # self.__episode_num_steps += 1
         self.__step_count += 1
 
         if obs.first():
