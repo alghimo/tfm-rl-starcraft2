@@ -139,7 +139,7 @@ class DQNAgent(BaseAgent):
         )
 
     @classmethod
-    def load(cls, checkpoint_path: Union[str|Path]) -> "DQNAgent":
+    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict) -> "DQNAgent":
         checkpoint_path = Path(checkpoint_path)
         agent_attrs_file = checkpoint_path / cls._AGENT_FILE
         with open(agent_attrs_file, mode="rb") as f:
@@ -154,8 +154,8 @@ class DQNAgent(BaseAgent):
             log_name=agent_attrs["log_name"]
         )
         parent_attrs = dict(
-            map_name=agent_attrs["map_name"],
-            map_config=agent_attrs["map_config"],
+            map_name=map_name,
+            map_config=map_config,
         )
         agent = cls(**dqn_agent_attrs, **parent_attrs)
         agent._load_agent_attrs(agent_attrs)

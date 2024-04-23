@@ -52,15 +52,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._used_command_center_positions = None
         self._used_barrack_positions = None
 
+
     def _load_agent_attrs(self, agent_attrs: Dict):
-        self._map_name = agent_attrs["map_name"]
-        self._map_config = agent_attrs["map_config"]
-        self._supply_depot_positions = agent_attrs["supply_depot_positions"]
-        self._command_center_positions = agent_attrs["command_center_positions"]
-        self._barrack_positions = agent_attrs["barrack_positions"]
-        self._used_supply_depot_positions = agent_attrs["used_supply_depot_positions"]
-        self._used_command_center_positions = agent_attrs["used_command_center_positions"]
-        self._used_barrack_positions = agent_attrs["used_barrack_positions"]
         # From SC2's Base agent
         self.reward = agent_attrs["reward"]
         self.episodes = agent_attrs["episodes"]
@@ -74,14 +67,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
     def _get_agent_attrs(self):
         return dict(
-            map_name=self._map_name,
-            map_config=self._map_config,
-            supply_depot_positions=self._supply_depot_positions,
-            used_supply_depot_positions=self._used_supply_depot_positions,
-            used_command_center_positions=self._used_command_center_positions,
-            used_barrack_positions=self._used_barrack_positions,
-            command_center_positions=self._command_center_positions,
-            barrack_positions=self._barrack_positions,
             # From SC2's Base agent
             reward=self.reward,
             episodes=self.episodes,
@@ -253,7 +238,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
         command_center_positions = [Position(cc.x, cc.y) for cc in command_centers]
         self._used_command_center_positions = command_center_positions
-        self._command_center_positions = [pos for pos in self._command_center_positions if pos not in command_center_positions]
+        # self._command_center_positions = [pos for pos in self._command_center_positions if pos not in command_center_positions]
 
     def get_next_supply_depot_position(self, obs: TimeStep) -> Position:
         next_pos = None
@@ -272,7 +257,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
         supply_depots_positions = [Position(sd.x, sd.y) for sd in supply_depots]
         self._used_supply_depot_positions = supply_depots_positions
-        self._supply_depot_positions = [pos for pos in self._supply_depot_positions if pos not in supply_depots_positions]
+        # self._supply_depot_positions = [pos for pos in self._supply_depot_positions if pos not in supply_depots_positions]
 
     def get_next_barracks_position(self, obs: TimeStep) -> Position:
         next_pos = None
@@ -280,7 +265,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             if candidate_position not in self._used_barrack_positions:
                 next_pos = candidate_position
                 break
-
         if next_pos is not None:
             # put all positions before the candidate position at the end
             self._barrack_positions = self._barrack_positions[idx + 1:] + self._barrack_positions[:idx+1]
@@ -291,7 +275,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
         barrack_positions = [Position(b.x, b.y) for b in barracks]
         self._used_barrack_positions = barrack_positions
-        self._barrack_positions = [pos for pos in self._supply_depot_positions if pos not in barrack_positions]
+        # self._barrack_positions = [pos for pos in self._barrack_positions if pos not in barrack_positions]
 
     def pre_step(self, obs: TimeStep):
         pass

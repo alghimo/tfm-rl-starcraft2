@@ -3,7 +3,7 @@ from pathlib import Path
 from absl import app, flags
 from pysc2.agents import base_agent
 from pysc2.env import sc2_env
-from pysc2.lib import actions, features
+from pysc2.lib import actions, features, units
 from tfm_sc2.actions import AllActions
 from tfm_sc2.agents.dqn_agent import DQNAgentParams, State
 from tfm_sc2.agents.single.single_dqn_agent import SingleDQNAgent
@@ -23,6 +23,8 @@ def main(unused_argv):
     checkpoint_path: Path = None
     agent_file = None
     save_agent = False
+    print(f"Map name: {map_name}")
+    print(f"Map available actions: ", map_config["available_actions"])
 
     other_agents = []
     if len(map_config["players"]) > 1:
@@ -48,7 +50,7 @@ def main(unused_argv):
 
             if load_agent:
                 print(f"Loading agent from file {checkpoint_path}")
-                agent = SingleDQNAgent.load(checkpoint_path)
+                agent = SingleDQNAgent.load(checkpoint_path, map_name=map_name, map_config=map_config)
             else:
                 num_actions = len(AllActions)
                 model_layers = [64, 48, 32]
@@ -108,11 +110,10 @@ if __name__ == "__main__":
     DEFAULT_MODELS_PATH = str(Path(__file__).parent.parent.parent / "models")
 
     flags.DEFINE_enum("agent_key", "single.random", ["single.random", "single.dqn"], "Agent to use.")
-    flags.DEFINE_enum("map_name", "Simple64", ["CollectMineralsAndGas", "Simple64", "BuildMarines"], "Map to use.")
+    flags.DEFINE_enum("map_name", "Simple64", ["CollectMineralsAndGas", "Simple64", "BuildMarines", "DefeatRoaches"], "Map to use.")
     flags.DEFINE_integer("num_episodes", 1, "Number of episodes to play.", lower_bound=1)
     flags.DEFINE_string("model_id", default=None, help="Determines the folder inside 'models_path' to save the model to", required=False)
     flags.DEFINE_string("models_path", help="Path where checkpoints are written to/loaded from", required=False, default=DEFAULT_MODELS_PATH)
     flags.DEFINE_integer("save_frequency_episodes", default=1, help="We save the agent every X episodes.", lower_bound=1, required=False)
-    # flags.DEFINE_bool("different_agent_per_save", default=False, help="If true, we save the agent to a different subfolder within model_id each time, with subfolder_name = number of episodes", required=False)
 
     app.run(main)
