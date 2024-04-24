@@ -23,6 +23,7 @@ def main(unused_argv):
     checkpoint_path: Path = None
     agent_file = None
     save_agent = False
+    exploit = FLAGS.exploit
     print(f"Map name: {map_name}")
     print(f"Map available actions: ", map_config["available_actions"])
 
@@ -41,7 +42,8 @@ def main(unused_argv):
             if FLAGS.model_id is not None:
                 checkpoint_path = Path(FLAGS.models_path) / FLAGS.model_id
                 checkpoint_path.mkdir(exist_ok=True, parents=True)
-                save_agent = True
+                # TODO decide what to do with this (default was true)
+                save_agent = not exploit
 
                 agent_file = checkpoint_path / "agent.pkl"
 
@@ -61,6 +63,11 @@ def main(unused_argv):
                 buffer = ExperienceReplayBuffer(memory_size=10000, burn_in=1000)
                 agent_params = DQNAgentParams(epsilon=0.1, epsilon_decay=0.99, min_epsilon=0.01, batch_size=32, gamma=0.99, main_network_update_frequency=1, target_network_sync_frequency=50, target_sync_mode="soft", update_tau=0.01)
                 agent = SingleDQNAgent(map_name=map_name, map_config=map_config, main_network=dqn, buffer=buffer, hyperparams=agent_params, log_name = "Main Agent")
+
+            if exploit:
+                agent.exploit()
+            else:
+                agent.train()
         case _:
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:
@@ -90,8 +97,7 @@ def main(unused_argv):
                     if episode_ended:
                         # Perform one last step to process rewards etc
                         last_step_actions = [a.step(timestep) for a, timestep in zip([agent, *other_agents], timesteps)]
-                        # step_actions = [agent.step(timesteps[0])]
-                        print(f"Total reward for main agent: {agent.reward}")
+
                         for idx, a in enumerate(other_agents):
                             print(f"Total reward for random agent {idx + 1}: {a.reward}")
 
@@ -102,6 +108,8 @@ def main(unused_argv):
                     already_saved = True
         if save_agent and not already_saved:
             print(f"Saving final agent after {finished_episodes} episodes")
+            if hasattr(agent, "stop_task"):
+                agent.stop_task()
             agent.save(checkpoint_path)
     except KeyboardInterrupt:
         pass
@@ -115,5 +123,6 @@ if __name__ == "__main__":
     flags.DEFINE_string("model_id", default=None, help="Determines the folder inside 'models_path' to save the model to", required=False)
     flags.DEFINE_string("models_path", help="Path where checkpoints are written to/loaded from", required=False, default=DEFAULT_MODELS_PATH)
     flags.DEFINE_integer("save_frequency_episodes", default=1, help="We save the agent every X episodes.", lower_bound=1, required=False)
+    flags.DEFINE_boolean("exploit", default=False, required=False, help="Use the agent in explotation mode, not for training.")
 
     app.run(main)

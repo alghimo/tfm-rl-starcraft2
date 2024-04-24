@@ -17,15 +17,17 @@ class SingleRandomAgent(BaseAgent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.__agent_actions = list(AllActions)
+        self.__original_agent_actions = list(AllActions)
+        self.__agent_actions = [a for a in self.__original_agent_actions if a in self._map_config["available_actions"]]
 
     @property
     def agent_actions(self) -> List[AllActions]:
         return self.__agent_actions
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
-        available_actions = self.available_actions(obs)
-        action = random.choice(available_actions)
+        # available_actions = self.available_actions(obs)
+        # action = random.choice(available_actions)
+        action = random.choice(self.__agent_actions)
         action_args, is_valid_action = self._get_action_args(obs=obs, action=action)
 
         if not is_valid_action:

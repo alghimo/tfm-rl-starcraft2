@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 import numpy as np
@@ -9,6 +9,7 @@ class AgentStats:
     map_name: str
     step_count: int = 0
     episode_count: int = 0
+    total_reward: int = 0
 
 
 @dataclass
@@ -17,21 +18,21 @@ class EpisodeStats:
     reward: int = 0
     steps: int = 0
     epsilon: float = 1.
-    losses: List[float] = []
+    losses: List[float] = field(default_factory=list)
 
     @property
     def mean_loss(self) -> float:
         if any(self.losses):
-            return sum(self.__current_episode_losses) / len(self.__current_episode_losses)
+            return sum(self.losses) / len(self.losses)
         return np.inf
 
 @dataclass
 class AggregatedEpisodeStats:
     map_name: str
-    rewards: List[int] = []
-    epsilon: List[float] = []
-    losses: List[float] = []
-    steps: List[int] = []
+    rewards: List[int] = field(default_factory=list)
+    epsilons: List[float] = field(default_factory=list)
+    losses: List[float] = field(default_factory=list)
+    steps: List[int] = field(default_factory=list)
     max_reward: int = None
 
     @property

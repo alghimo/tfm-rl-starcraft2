@@ -17,6 +17,7 @@ from ..constants import Constants, SC2Costs
 from ..networks.dqn_network import DQNNetwork
 from ..networks.experience_replay_buffer import ExperienceReplayBuffer
 from ..types import Gas, Minerals
+from ..with_tracker import WithTracker
 from .base_agent import BaseAgent
 from .stats import AgentStats, AggregatedEpisodeStats, EpisodeStats
 
@@ -67,7 +68,7 @@ State = namedtuple('State',
                                 "enemy_num_buildings", "enemy_total_building_health", "enemy_num_workers", "enemy_num_army_units", "enemy_total_army_health",
                             ])
 
-class DQNAgent(BaseAgent):
+class DQNAgent(WithTracker, BaseAgent):
     _MAIN_NETWORK_FILE: str = "main_network.pt"
     _TARGET_NETWORK_FILE: str = "target_network.pt"
     _AGENT_FILE: str = "agent.pkl"
@@ -163,6 +164,15 @@ class DQNAgent(BaseAgent):
         agent = cls(**dqn_agent_attrs, **parent_attrs)
         agent._load_agent_attrs(agent_attrs)
 
+        if agent._current_episode_stats is None or agent._current_episode_stats.map_name != map_name:
+            agent._current_episode_stats = EpisodeStats(map_name=self._map_name)
+        if map_name not in agent._agent_stats:
+            agent._agent_stats[map_name] = AgentStats(map_name=map_name)
+        if map_name not in agent._aggregated_episode_stats:
+            agent._aggregated_episode_stats[map_name] = AggregatedEpisodeStats(map_name=map_name)
+        if map_name not in agent._episode_stats:
+            agent._episode_stats[map_name] = []
+
         return agent
 
     def _load_agent_attrs(self, agent_attrs: Dict):
@@ -186,7 +196,6 @@ class DQNAgent(BaseAgent):
         self.__target_network_path = agent_attrs["target_network_path"]
         self.__agent_path = agent_attrs["agent_path"]
         self.__stats_path = agent_attrs["stats_path"]
-        self.__flags = agent_attrs["flags"]
         self.__step_count = agent_attrs["step_count"]
         self.__episode_count = agent_attrs["episode_count"]
         self.__update_losses = agent_attrs["update_losses"]
@@ -205,6 +214,7 @@ class DQNAgent(BaseAgent):
         self._episode_stats = agent_attrs["episode_stats"]
         self._aggregated_episode_stats = agent_attrs["aggregated_episode_stats"]
         self.loss = agent_attrs["loss"]
+        self._emissions_per_task = agent_attrs["emissions_per_task"]
 
     def _get_agent_attrs(self):
         parent_attrs = super()._get_agent_attrs()
@@ -228,7 +238,6 @@ class DQNAgent(BaseAgent):
             checkpoint_path=self.__checkpoint_path,
             agent_path=self.__agent_path,
             stats_path=self.__stats_path,
-            flags=self.__flags,
             step_count=self.__step_count,
             episode_count=self.__episode_count,
             update_losses=self.__update_losses,
@@ -249,8 +258,19 @@ class DQNAgent(BaseAgent):
             current_episode_steps=self.__current_episode_steps,
             current_episode_losses=self.__current_episode_losses,
             loss=self.loss,
+            emissions_per_task=self._emissions_per_task,
             **parent_attrs
         )
+
+    def train(self):
+        """Set the agent in training mode."""
+        self._train = True
+        self._exploit = False
+
+    def exploit(self):
+        """Set the agent in training mode."""
+        self._train = False
+        self._exploit = True
 
     def save(self, checkpoint_path: Union[str|Path] = None) -> "DQNAgent":
         if checkpoint_path is not None:
@@ -296,7 +316,7 @@ class DQNAgent(BaseAgent):
         self.__current_episode_steps = 0
         self.__current_episode_losses = []
 
-        self.__current_episode_stats = EpisodeStats(map_name=self._map_name)
+        self._current_episode_stats = EpisodeStats(map_name=self._map_name)
 
         self._episode_stats = {self._map_name: []}
         self._aggregated_episode_stats = {self._map_name: AggregatedEpisodeStats(map_name=self._map_name)}
@@ -325,7 +345,7 @@ class DQNAgent(BaseAgent):
         # # This should be exactly the same as self.steps (implemented by pysc2 base agent)
         # self.__current_episode_steps = 0
         # self.__current_episode_losses = []
-        self.__current_episode_stats = EpisodeStats(map_name=self._map_name)
+        self._current_episode_stats = EpisodeStats(map_name=self._map_name)
         self.current_agent_stats.episode_count += 1
 
     @property
@@ -378,20 +398,26 @@ class DQNAgent(BaseAgent):
         valid_actions = self._actions_to_network(available_actions)
         if self._train and (self.buffer.burn_in_capacity < 1):
             if not self.__flags["burnin_started"]:
+                self.start_task("training_burnin")
                 self.logger.info(f"Starting burn-in")
                 self.__flags["burnin_started"] = True
             self.logger.debug(f"Burn in capacity: {100 * self.buffer.burn_in_capacity:.2f}%")
             raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
         elif self.is_training:
             if not self.__flags["train_started"]:
+                self.stop_task()
+                self.start_task("training")
                 self.logger.info(f"Starting training")
                 self.__flags["train_started"] = True
             raw_action = self.main_network.get_action(self.__current_state, epsilon=self.epsilon, valid_actions=valid_actions)
         else:
             if not self.__flags["exploit_started"]:
+                self.stop_task()
+                self.start_task("exploit")
                 self.logger.info(f"Starting exploit")
                 self.__flags["exploit_started"] = True
-            raw_action = self.main_network.get_greedy_action(self.__current_state, valid_actions=valid_actions)
+            # When exploiting, do not use the invalid action masking
+            raw_action = self.main_network.get_greedy_action(self.__current_state)
 
         # Convert the "raw" action to a the right type of action
         action = self._idx_to_action[raw_action]
@@ -408,8 +434,8 @@ class DQNAgent(BaseAgent):
         self.__current_state = self._convert_obs_to_state(obs)
         reward = obs.reward
 
-        self.__current_episode_stats.reward += reward
-        self.__current_episode_stats.steps += 1
+        self._current_episode_stats.reward += reward
+        self._current_episode_stats.steps += 1
         self.current_agent_stats.step_count += 1
 
         if obs.first():
@@ -427,7 +453,7 @@ class DQNAgent(BaseAgent):
                     if not self.__flags["main_net_updated"]:
                         self.logger.info(f"First main network update")
                         self.__flags["main_net_updated"] = True
-                    self.__current_episode_stats.losses = self.update_main_network(self.__current_episode_stats.losses)
+                    self._current_episode_stats.losses = self.update_main_network(self._current_episode_stats.losses)
                     updated = True
                 if (self.__current_episode_steps % self.hyperparams.target_network_sync_frequency) == 0:
                     if not self.__flags["target_net_updated"]:
@@ -439,24 +465,25 @@ class DQNAgent(BaseAgent):
                 if done:
                     if not updated:
                         # If we finished but didn't update, perform one last update
-                        self.__current_episode_stats.losses = self.update_main_network(self.__current_episode_stats.losses)
+                        self._current_episode_stats.losses = self.update_main_network(self._current_episode_stats.losses)
 
-                    self.__current_episode_stats.epsilon = self.epsilon
+                    self._current_episode_stats.epsilon = self.epsilon
                     self.epsilon = max(self.epsilon * self.hyperparams.epsilon_decay, self.hyperparams.min_epsilon)
             elif self._exploit:
-                self.__current_episode_stats.epsilon = 0.
+                self._current_episode_stats.epsilon = 0.
 
 
             if done:
-                self.current_aggregated_episode_stats.process_episode(self.__current_episode_stats)
-
+                self.current_agent_stats.total_reward += self._current_episode_stats.reward
+                self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
+                self._episode_stats[self._map_name].append(self._current_episode_stats)
                 print(
                     f"\rEpisode {self.current_agent_stats.episode_count} :: "
                     + f"Mean Rewards ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_rewards:.2f} :: "
                     + f"Mean Rewards (10ep) {self.current_aggregated_episode_stats.mean_rewards_last_n_episodes(n=10):.2f} :: "
-                    + f"Epsilon {self.__current_episode_stats.epsilon:.4f} :: "
+                    + f"Epsilon {self._current_episode_stats.epsilon:.4f} :: "
                     + f"Max reward {self.current_aggregated_episode_stats.max_reward:.2f} :: "
-                    + f"Episode steps: {self.__current_episode_stats.steps} :: "
+                    + f"Episode steps: {self._current_episode_stats.steps} :: "
                     + f"Total steps: {self.current_agent_stats.step_count}\t\t\t\t", end="")
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):

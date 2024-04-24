@@ -211,6 +211,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
                 case AllActions.ATTACK_WITH_FULL_ARMY:
                     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                    assert len(idle_marines) > 0, "Can't attack with no units"
                     enemies = self.get_enemy_units(obs)
                     enemy_tag = random.choice(enemies).tag
                     action_args = dict(source_unit_tags=idle_marines, target_unit_tag=enemy_tag)
