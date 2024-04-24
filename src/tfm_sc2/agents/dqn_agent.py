@@ -1,6 +1,7 @@
 import pickle
 from collections import namedtuple
 from copy import copy, deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple, Union
 
@@ -17,6 +18,7 @@ from ..networks.dqn_network import DQNNetwork
 from ..networks.experience_replay_buffer import ExperienceReplayBuffer
 from ..types import Gas, Minerals
 from .base_agent import BaseAgent
+from .stats import AgentStats, AggregatedEpisodeStats, EpisodeStats
 
 DQNAgentParams = namedtuple('DQNAgentParams',
                             field_names=["epsilon", "epsilon_decay", "min_epsilon", "batch_size", "gamma", "loss", "main_network_update_frequency", "target_network_sync_frequency", "target_sync_mode", "update_tau"],
@@ -98,6 +100,7 @@ class DQNAgent(BaseAgent):
         self.buffer = buffer
         self.hyperparams = hyperparams
         self.initial_epsilon = hyperparams.epsilon
+        self.epsilon = hyperparams.epsilon
         self._train = train
         self._exploit = not train
 
@@ -198,6 +201,9 @@ class DQNAgent(BaseAgent):
         self.__current_episode_reward = agent_attrs["current_episode_reward"]
         self.__current_episode_steps = agent_attrs["current_episode_steps"]
         self.__current_episode_losses = agent_attrs["current_episode_losses"]
+        self._agent_stats = agent_attrs["agent_stats"]
+        self._episode_stats = agent_attrs["episode_stats"]
+        self._aggregated_episode_stats = agent_attrs["aggregated_episode_stats"]
         self.loss = agent_attrs["loss"]
 
     def _get_agent_attrs(self):
@@ -231,6 +237,9 @@ class DQNAgent(BaseAgent):
             mean_rewards=self.__mean_rewards,
             mean_rewards_10=self.__mean_rewards_10,
             episode_losses=self.__episode_losses,
+            agent_stats=self._agent_stats,
+            episode_stats=self._episode_stats,
+            aggregated_episode_stats=self._aggregated_episode_stats,
             # Steps performed on each episode
             episode_steps=self.__episode_steps,
             mean_steps=self.__mean_steps,
@@ -261,91 +270,6 @@ class DQNAgent(BaseAgent):
         with open(self.__agent_path, "wb") as f:
             pickle.dump(agent_attrs, f)
 
-
-    # def __getstate__(self):
-    #     # Save the main network
-    #     torch.save(self.main_network, self.__main_network_path)
-    #     torch.save(self.target_network, self.__target_network_path)
-    #     return dict(
-    #         device=self.device,
-    #         main_network_path=self.__main_network_path,
-    #         target_network_path=self.__target_network_path,
-    #         buffer=self.buffer,
-    #         hyperparams=self.hyperparams,
-    #         initial_epsilon=self.initial_epsilon,
-    #         train=self._train,
-    #         exploit=self._exploit,
-    #         action_to_idx=self._action_to_idx,
-    #         idx_to_action=self._idx_to_action,
-    #         num_actions=self._num_actions,
-    #         current_state=self.__current_state,
-    #         prev_state=self.__prev_state,
-    #         prev_reward=self.__prev_reward,
-    #         prev_action=self.__prev_action,
-    #         prev_action_args=self.__prev_action_args,
-    #         checkpoint_path=self.__checkpoint_path,
-    #         agent_path=self.__agent_path,
-    #         stats_path=self.__stats_path,
-    #         flags=self.__flags,
-    #         step_count=self.__step_count,
-    #         episode_count=self.__episode_count,
-    #         update_losses=self.__update_losses,
-    #         episode_rewards=self.__episode_rewards,
-    #         episode_eps=self.__episode_eps,
-    #         mean_rewards=self.__mean_rewards,
-    #         mean_rewards_10=self.__mean_rewards_10,
-    #         episode_losses=self.__episode_losses,
-    #         # Steps performed on each episode
-    #         episode_steps=self.__episode_steps,
-    #         mean_steps=self.__mean_steps,
-    #         # Highest reward for any episode
-    #         max_episode_rewards=self.__max_episode_rewards,
-    #         current_episode_reward=self.__current_episode_reward,
-    #         current_episode_steps=self.__current_episode_steps,
-    #         current_episode_losses=self.__current_episode_losses
-    #     )
-
-    # def __setstate__(self, state: Dict):
-    #     super().__setstate__(state)
-    #     self.device = state["device"]
-    #     self.__main_network_path = state["main_network_path"]
-    #     self.main_network = torch.load(state["main_network_path"])
-    #     self.__target_network_path = state["target_network_path"]
-    #     self.target_network = torch.load(state["target_network_path"])
-    #     self.buffer = state["buffer"]
-    #     self.hyperparams = state["hyperparams"]
-    #     self.initial_epsilon = state["initial_epsilon"]
-    #     self._train = state["train"]
-    #     self._exploit = state["exploit"]
-    #     self._action_to_idx = state["action_to_idx"]
-    #     self._idx_to_action = state["idx_to_action"]
-    #     self._num_actions = state["num_actions"]
-    #     self.__current_state = state["current_state"]
-    #     self.__prev_state = state["prev_state"]
-    #     self.__prev_reward = state["prev_reward"]
-    #     self.__prev_action = state["prev_action"]
-    #     self.__prev_action_args = state["prev_action_args"]
-    #     self.__checkpoint_path = state["checkpoint_path"]
-    #     self.__main_network_path = state["main_network_path"]
-    #     self.__target_network_path = state["target_network_path"]
-    #     self.__agent_path = state["agent_path"]
-    #     self.__stats_path = state["stats_path"]
-    #     self.__flags = state["flags"]
-    #     self.__step_count = state["step_count"]
-    #     self.__episode_count = state["episode_count"]
-    #     self.__update_losses = state["update_losses"]
-    #     self.__episode_rewards = state["episode_rewards"]
-    #     self.__episode_eps = state["episode_eps"]
-    #     self.__mean_rewards = state["mean_rewards"]
-    #     self.__mean_rewards_10 = state["mean_rewards_10"]
-    #     self.__episode_losses = state["episode_losses"]
-    #     self.__episode_steps = state["episode_steps"]
-    #     self.__mean_steps = state["mean_steps"]
-    #     self.__max_episode_rewards = state["max_episode_rewards"]
-    #     self.__current_episode_reward = state["current_episode_reward"]
-    #     self.__current_episode_steps = state["current_episode_steps"]
-    #     self.__current_episode_losses = state["current_episode_losses"]
-
     def initialize(self):
         # This should be exactly the same as self.steps (implemented by pysc2 base agent)
         self.__step_count = 0
@@ -372,6 +296,20 @@ class DQNAgent(BaseAgent):
         self.__current_episode_steps = 0
         self.__current_episode_losses = []
 
+        self.__current_episode_stats = EpisodeStats(map_name=self._map_name)
+
+        self._episode_stats = {self._map_name: []}
+        self._aggregated_episode_stats = {self._map_name: AggregatedEpisodeStats(map_name=self._map_name)}
+        self._agent_stats = {self._map_name: AgentStats(map_name=self._map_name)}
+
+    @property
+    def current_agent_stats(self) -> AgentStats:
+        return self._agent_stats[self._map_name]
+
+    @property
+    def current_aggregated_episode_stats(self) -> AggregatedEpisodeStats:
+        return self._aggregated_episode_stats[self._map_name]
+
     def reset(self, **kwargs):
         """Initialize the agent."""
         super().reset(**kwargs)
@@ -382,10 +320,13 @@ class DQNAgent(BaseAgent):
         self.__prev_action = None
         self.__prev_action_args = None
         self.__current_state = None
-        self.__current_episode_reward = 0
-        # This should be exactly the same as self.steps (implemented by pysc2 base agent)
-        self.__current_episode_steps = 0
-        self.__current_episode_losses = []
+        # self.__current_episode_reward = 0
+        # self.__current_episode_stats = EpisodeStats(map_name=self._map_name)
+        # # This should be exactly the same as self.steps (implemented by pysc2 base agent)
+        # self.__current_episode_steps = 0
+        # self.__current_episode_losses = []
+        self.__current_episode_stats = EpisodeStats(map_name=self._map_name)
+        self.current_agent_stats.episode_count += 1
 
     @property
     def is_training(self):
@@ -445,7 +386,7 @@ class DQNAgent(BaseAgent):
             if not self.__flags["train_started"]:
                 self.logger.info(f"Starting training")
                 self.__flags["train_started"] = True
-            raw_action = self.main_network.get_action(self.__current_state, epsilon=self.hyperparams.epsilon, valid_actions=valid_actions)
+            raw_action = self.main_network.get_action(self.__current_state, epsilon=self.epsilon, valid_actions=valid_actions)
         else:
             if not self.__flags["exploit_started"]:
                 self.logger.info(f"Starting exploit")
@@ -467,13 +408,9 @@ class DQNAgent(BaseAgent):
         self.__current_state = self._convert_obs_to_state(obs)
         reward = obs.reward
 
-        # marines = len(self.get_self_units(obs, unit_types=units.Terran.Marine))
-
-
-
-        self.__current_episode_reward += reward
-        self.__current_episode_steps += 1
-        self.__step_count += 1
+        self.__current_episode_stats.reward += reward
+        self.__current_episode_stats.steps += 1
+        self.current_agent_stats.step_count += 1
 
         if obs.first():
             self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
@@ -490,7 +427,7 @@ class DQNAgent(BaseAgent):
                     if not self.__flags["main_net_updated"]:
                         self.logger.info(f"First main network update")
                         self.__flags["main_net_updated"] = True
-                    self.__current_episode_losses = self.update_main_network(self.__current_episode_losses)
+                    self.__current_episode_stats.losses = self.update_main_network(self.__current_episode_stats.losses)
                     updated = True
                 if (self.__current_episode_steps % self.hyperparams.target_network_sync_frequency) == 0:
                     if not self.__flags["target_net_updated"]:
@@ -502,41 +439,25 @@ class DQNAgent(BaseAgent):
                 if done:
                     if not updated:
                         # If we finished but didn't update, perform one last update
-                        self.__current_episode_losses = self.update_main_network(self.__current_episode_losses)
-                    # Add the episode rewards to the training rewards
-                    self.__episode_rewards.append(self.__current_episode_reward)
-                    # Register the epsilon used in the last episode played
-                    self.__episode_eps.append(self.hyperparams.epsilon)
-                    # We'll use the average loss as the episode loss
-                    if any(self.__current_episode_losses):
-                        episode_loss = sum(self.__current_episode_losses) / len(self.__current_episode_losses)
-                    else:
-                        self.logger.error("No losses at the end of episode - meaning no updates to the main network happened")
-                        episode_loss = np.inf
-                    self.__episode_losses.append(episode_loss)
-                    self.__episode_steps.append(self.__current_episode_steps)
-                    # Get the average reward of all episodes.
-                    mean_rewards = np.mean(self.__episode_rewards)
-                    # Also keep the rolling average of the last 10 episodes
-                    mean_rewards_10 = np.mean(self.__episode_rewards[-10:])
-                    self.__mean_rewards.append(mean_rewards)
-                    self.__mean_rewards_10.append(mean_rewards_10)
+                        self.__current_episode_stats.losses = self.update_main_network(self.__current_episode_stats.losses)
 
-                    mean_steps = np.mean(self.__episode_steps)
-                    self.__mean_steps.append(mean_steps)
+                    self.__current_episode_stats.epsilon = self.epsilon
+                    self.epsilon = max(self.epsilon * self.hyperparams.epsilon_decay, self.hyperparams.min_epsilon)
+            elif self._exploit:
+                self.__current_episode_stats.epsilon = 0.
 
-                    # Check if we have a new max score
-                    if self.__max_episode_rewards is None or (self.__current_episode_reward > self.__max_episode_rewards):
-                        self.__max_episode_rewards = self.__current_episode_reward
 
-                    print(
-                        f"\rEpisode {self.__episode_count} :: "
-                        + f"Mean Rewards ({self.__episode_count} ep) {mean_rewards:.2f} :: "
-                        + f"Mean Rewards (10ep) {mean_rewards_10:.2f} :: "
-                        + f"Epsilon {self.hyperparams.epsilon:.4f} :: "
-                        + f"Max reward {self.__max_episode_rewards:.2f} :: "
-                        + f"Episode steps: {self.__current_episode_steps} :: "
-                        + f"Total steps: {self.__step_count}\t\t\t\t", end="")
+            if done:
+                self.current_aggregated_episode_stats.process_episode(self.__current_episode_stats)
+
+                print(
+                    f"\rEpisode {self.current_agent_stats.episode_count} :: "
+                    + f"Mean Rewards ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_rewards:.2f} :: "
+                    + f"Mean Rewards (10ep) {self.current_aggregated_episode_stats.mean_rewards_last_n_episodes(n=10):.2f} :: "
+                    + f"Epsilon {self.__current_episode_stats.epsilon:.4f} :: "
+                    + f"Max reward {self.current_aggregated_episode_stats.max_reward:.2f} :: "
+                    + f"Episode steps: {self.__current_episode_stats.steps} :: "
+                    + f"Total steps: {self.current_agent_stats.step_count}\t\t\t\t", end="")
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
         self.__prev_state = self.__current_state
