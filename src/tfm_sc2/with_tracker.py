@@ -8,6 +8,13 @@ class WithTracker:
         self._tracker = OfflineEmissionsTracker(country_iso_code="ESP", measure_power_secs=10)
         self._emissions_per_task = dict()
         self._current_tracker_task = None
+        self._total_emissions = 0.
+
+    def set_emissions(self, emissions: float):
+        self._total_emissions = emissions
+
+    def add_emissions(self, emissions: float):
+        self._total_emissions += emissions
 
     def start_task(self, task_name: str):
         if self._current_tracker_task is not None and self._current_tracker_task != task_name:
@@ -27,3 +34,7 @@ class WithTracker:
 
     def stop_tracker(self):
         self._tracker.stop()
+
+    @property
+    def total_emissions(self) -> float:
+        return sum(self._emissions_per_task.values())

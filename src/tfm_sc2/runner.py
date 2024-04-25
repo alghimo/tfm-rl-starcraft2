@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from absl import app, flags
+from codecarbon import OfflineEmissionsTracker, track_emissions
 from pysc2.agents import base_agent
 from pysc2.env import sc2_env
 from pysc2.lib import actions, features, units
@@ -11,8 +12,10 @@ from tfm_sc2.agents.single.single_random_agent import SingleRandomAgent
 from tfm_sc2.networks.dqn_network import DQNNetwork
 from tfm_sc2.networks.experience_replay_buffer import ExperienceReplayBuffer
 from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
+from tfm_sc2.with_tracker import WithTracker
 
 
+# @track_emissions(offline=True, tracking_mode="process")
 def main(unused_argv):
     FLAGS = flags.FLAGS
 
@@ -20,10 +23,20 @@ def main(unused_argv):
     if map_name not in MAP_CONFIGS:
         raise RuntimeError(f"No config for map {map_name}")
     map_config = MAP_CONFIGS[map_name]
-    checkpoint_path: Path = None
-    agent_file = None
-    save_agent = False
+    model_id = FLAGS.model_id or FLAGS.agent_key
+    checkpoint_path = Path(FLAGS.models_path) / model_id
+    checkpoint_path.mkdir(exist_ok=True, parents=True)
+    save_path = checkpoint_path
+    # checkpoint_path: Path = None
+    agent_file = checkpoint_path / "agent.pkl"
+    load_agent = agent_file.exists()
+    save_agent = True
     exploit = FLAGS.exploit
+    # We will still save the stats when exploiting, but in a subfolder
+    if exploit:
+        save_path = checkpoint_path / "exploit"
+        save_path.mkdir(exist_ok=True, parents=True)
+
     print(f"Map name: {map_name}")
     print(f"Map available actions: ", map_config["available_actions"])
 
@@ -35,20 +48,15 @@ def main(unused_argv):
                 other_agents.append(SingleRandomAgent(map_name=map_name, map_config=map_config, log_name = f"Random Agent {len(other_agents) + 1}"))
     match FLAGS.agent_key:
         case "single.random":
-            agent = SingleRandomAgent(map_name=map_name, map_config=map_config, log_name = "Main Agent")
+            if load_agent:
+                # TODO implement load method into base agent
+                raise NotImplementedError(f"SingleRandomAgent.load not implemented yet")
+            else:
+                agent = SingleRandomAgent(map_name=map_name, map_config=map_config, log_name = "Main Agent")
         case "single.dqn":
             load_agent = False
             # Check if checkpoint exists first
-            if FLAGS.model_id is not None:
-                checkpoint_path = Path(FLAGS.models_path) / FLAGS.model_id
-                checkpoint_path.mkdir(exist_ok=True, parents=True)
-                # TODO decide what to do with this (default was true)
-                save_agent = not exploit
-
-                agent_file = checkpoint_path / "agent.pkl"
-
-                if agent_file.exists():
-                    load_agent = True
+            agent_file = checkpoint_path / "agent.pkl"
 
             if load_agent:
                 print(f"Loading agent from file {checkpoint_path}")
@@ -72,7 +80,9 @@ def main(unused_argv):
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:
         finished_episodes = 0
-
+        tracker = OfflineEmissionsTracker(country_iso_code="ESP", experiment_id=f"global_{FLAGS.model_id}_{map_name}")
+        tracker.start()
+        task_name = "exploit" if exploit else "train"
         while finished_episodes < FLAGS.num_episodes:
             already_saved = False
             with sc2_env.SC2Env(
@@ -81,8 +91,12 @@ def main(unused_argv):
                 **SC2_CONFIG) as env:
 
                 agent.setup(env.observation_spec(), env.action_spec())
+                if isinstance(agent, WithTracker):
+                    agent.start_task(task_name=task_name)
                 for a in other_agents:
                     a.setup(env.observation_spec(), env.action_spec())
+                    if isinstance(a, WithTracker):
+                        a.start_task(task_name=task_name)
 
                 timesteps = env.reset()
                 agent.reset()
@@ -104,13 +118,19 @@ def main(unused_argv):
                 finished_episodes += 1
                 if save_agent and (finished_episodes % FLAGS.save_frequency_episodes) == 0:
                     print(f"Saving agent after {finished_episodes} episodes")
-                    agent.save(checkpoint_path)
+                    agent.save(save_path)
                     already_saved = True
         if save_agent and not already_saved:
             print(f"Saving final agent after {finished_episodes} episodes")
-            if hasattr(agent, "stop_task"):
+            total_emissions = tracker.stop()
+            if isinstance(agent, WithTracker):
                 agent.stop_task()
-            agent.save(checkpoint_path)
+                agent.add_emissions(total_emissions)
+
+            agent.save(save_path)
+        else:
+            total_emissions = tracker.stop()
+            print(f"Total emissions after {finished_episodes} episodes for agent {agent._log_name} (and {len(other_agents)} other agents): {total_emissions:.2f}")
     except KeyboardInterrupt:
         pass
 
@@ -124,5 +144,6 @@ if __name__ == "__main__":
     flags.DEFINE_string("models_path", help="Path where checkpoints are written to/loaded from", required=False, default=DEFAULT_MODELS_PATH)
     flags.DEFINE_integer("save_frequency_episodes", default=1, help="We save the agent every X episodes.", lower_bound=1, required=False)
     flags.DEFINE_boolean("exploit", default=False, required=False, help="Use the agent in explotation mode, not for training.")
+    flags.DEFINE_boolean("save_agent", default=True, required=False, help="Whether to save the agent and/or its stats.")
 
     app.run(main)
