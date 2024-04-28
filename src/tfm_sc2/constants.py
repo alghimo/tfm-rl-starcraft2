@@ -33,6 +33,10 @@ class Constants:
     # TODO Review places where we use this if we ever add the option to build a reactor
     BARRACKS_QUEUE_LENGTH = 5
     WORKER_UNIT_TYPES = [Terran.SCV, Protoss.Probe, Zerg.Drone, Terran.MULE]
+    HARVEST_ACTIONS = [
+        359, # Function.raw_ability(359, "Harvest_Gather_SCV_unit", raw_cmd_unit, 295, 3666),
+        362, # Function.raw_ability(362, "Harvest_Return_SCV_quick", raw_cmd, 296, 3667),
+    ]
     BUILDING_UNIT_TYPES=[
         # Terran
         # Wings of liberty

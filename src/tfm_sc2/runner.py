@@ -1,10 +1,9 @@
+import logging
 from pathlib import Path
 
 from absl import app, flags
-from codecarbon import OfflineEmissionsTracker, track_emissions
-from pysc2.agents import base_agent
+from codecarbon import OfflineEmissionsTracker
 from pysc2.env import sc2_env
-from pysc2.lib import actions, features, units
 from tfm_sc2.actions import AllActions
 from tfm_sc2.agents.dqn_agent import DQNAgentParams, State
 from tfm_sc2.agents.single.single_dqn_agent import SingleDQNAgent
@@ -12,10 +11,8 @@ from tfm_sc2.agents.single.single_random_agent import SingleRandomAgent
 from tfm_sc2.networks.dqn_network import DQNNetwork
 from tfm_sc2.networks.experience_replay_buffer import ExperienceReplayBuffer
 from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
-from tfm_sc2.with_tracker import WithTracker
 
 
-# @track_emissions(offline=True, tracking_mode="process")
 def main(unused_argv):
     FLAGS = flags.FLAGS
 
@@ -46,6 +43,7 @@ def main(unused_argv):
             if isinstance(other_agent_type, sc2_env.Agent):
                 print(f"Adding random agent as opponent #{len(other_agents) + 1}#")
                 other_agents.append(SingleRandomAgent(map_name=map_name, map_config=map_config, log_name = f"Random Agent {len(other_agents) + 1}"))
+
     match FLAGS.agent_key:
         case "single.random":
             if load_agent:
@@ -68,7 +66,7 @@ def main(unused_argv):
                 learning_rate = 1e-4
                 dqn = DQNNetwork(model_layers=model_layers, observation_space_shape=obs_input_shape, num_actions=num_actions, learning_rate=learning_rate)
 
-                buffer = ExperienceReplayBuffer(memory_size=10000, burn_in=1000)
+                buffer = ExperienceReplayBuffer(memory_size=100000, burn_in=10000)
                 agent_params = DQNAgentParams(epsilon=0.1, epsilon_decay=0.99, min_epsilon=0.01, batch_size=32, gamma=0.99, main_network_update_frequency=1, target_network_sync_frequency=50, target_sync_mode="soft", update_tau=0.01)
                 agent = SingleDQNAgent(map_name=map_name, map_config=map_config, main_network=dqn, buffer=buffer, hyperparams=agent_params, log_name = "Main Agent")
 
@@ -80,9 +78,10 @@ def main(unused_argv):
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:
         finished_episodes = 0
-        tracker = OfflineEmissionsTracker(country_iso_code="ESP", experiment_id=f"global_{FLAGS.model_id}_{map_name}")
+        # We set measure_power_secs to a very high value because we want to flush emissions as we want
+        tracker = OfflineEmissionsTracker(country_iso_code="ESP", experiment_id=f"global_{FLAGS.model_id}_{map_name}", measure_power_secs=3600, log_level=logging.WARNING)
+        agent.set_tracker(tracker)
         tracker.start()
-        task_name = "exploit" if exploit else "train"
         while finished_episodes < FLAGS.num_episodes:
             already_saved = False
             with sc2_env.SC2Env(
@@ -91,12 +90,8 @@ def main(unused_argv):
                 **SC2_CONFIG) as env:
 
                 agent.setup(env.observation_spec(), env.action_spec())
-                if isinstance(agent, WithTracker):
-                    agent.start_task(task_name=task_name)
                 for a in other_agents:
                     a.setup(env.observation_spec(), env.action_spec())
-                    if isinstance(a, WithTracker):
-                        a.start_task(task_name=task_name)
 
                 timesteps = env.reset()
                 agent.reset()
@@ -116,6 +111,7 @@ def main(unused_argv):
                             print(f"Total reward for random agent {idx + 1}: {a.reward}")
 
                 finished_episodes += 1
+
                 if save_agent and (finished_episodes % FLAGS.save_frequency_episodes) == 0:
                     print(f"Saving agent after {finished_episodes} episodes")
                     agent.save(save_path)
@@ -123,10 +119,6 @@ def main(unused_argv):
         if save_agent and not already_saved:
             print(f"Saving final agent after {finished_episodes} episodes")
             total_emissions = tracker.stop()
-            if isinstance(agent, WithTracker):
-                agent.stop_task()
-                agent.add_emissions(total_emissions)
-
             agent.save(save_path)
         else:
             total_emissions = tracker.stop()
@@ -145,5 +137,6 @@ if __name__ == "__main__":
     flags.DEFINE_integer("save_frequency_episodes", default=1, help="We save the agent every X episodes.", lower_bound=1, required=False)
     flags.DEFINE_boolean("exploit", default=False, required=False, help="Use the agent in explotation mode, not for training.")
     flags.DEFINE_boolean("save_agent", default=True, required=False, help="Whether to save the agent and/or its stats.")
+    flags.DEFINE_boolean("random_mode", default=False, required=False, help="Tell the agent to run in random mode. Used mostly to ensure we collect experiences.")
 
     app.run(main)

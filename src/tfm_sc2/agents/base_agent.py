@@ -1,28 +1,34 @@
 import logging
+import pickle
 import random
+import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+from codecarbon.emissions_tracker import BaseEmissionsTracker
 from pysc2.agents import base_agent
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, features, units
 from pysc2.lib.features import PlayerRelative
 from pysc2.lib.named_array import NamedNumpyArray
+from typing_extensions import Self
 
 from ..actions import AllActions
 from ..constants import Constants, SC2Costs
 from ..types import Gas, Minerals, Position
 from ..with_logger import WithLogger
 
+# from ..with_tracker import WithTracker
+from .stats import AgentStats, AggregatedEpisodeStats, EpisodeStats
+
 # from .agent_utils import AgentUtils
 
 
 class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
-    HARVEST_ACTIONS = [
-        359, # Function.raw_ability(359, "Harvest_Gather_SCV_unit", raw_cmd_unit, 295, 3666),
-        362, # Function.raw_ability(362, "Harvest_Return_SCV_quick", raw_cmd, 296, 3667),
-    ]
+    _AGENT_FILE: str = "agent.pkl"
+    _STATS_FILE: str =  "stats.parquet"
 
     _action_to_game = {
         AllActions.NO_OP: actions.RAW_FUNCTIONS.no_op,
@@ -41,7 +47,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         AllActions.ATTACK_WITH_FULL_ARMY: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag)
     }
 
-    def __init__(self, map_name: str, map_config: Dict, **kwargs):
+    def __init__(self, map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10, **kwargs):
         super().__init__(**kwargs)
         self._map_name = map_name
         self._map_config = map_config
@@ -51,9 +57,118 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._used_supply_depot_positions = None
         self._used_command_center_positions = None
         self._used_barrack_positions = None
+        self._train = train
+        self._exploit = not train
+        self._tracker: BaseEmissionsTracker = None
+        self._tracker_update_freq_seconds = tracker_update_freq_seconds
+        self._tracker_last_update = time.time()
 
+        if checkpoint_path is not None:
+            self._checkpoint_path = Path(checkpoint_path)
+            self._checkpoint_path.mkdir(exist_ok=True, parents=True)
+            self._agent_path = self._checkpoint_path / self._AGENT_FILE
+            self._stats_path = self._checkpoint_path / self._STATS_FILE
+        else:
+            self._checkpoint_path = None
+            self._main_network_path = None
+            self._target_network_path = None
+            self._agent_path = None
+            self._stats_path = None
+
+        self._status_flags = dict(
+            train_started=False,
+            exploit_started=False,
+        )
+
+        self.initialize()
+
+    def initialize(self):
+        self._current_episode_stats = EpisodeStats(map_name=self._map_name)
+        self._episode_stats = {self._map_name: []}
+        self._aggregated_episode_stats = {self._map_name: AggregatedEpisodeStats(map_name=self._map_name)}
+        self._agent_stats = {self._map_name: AgentStats(map_name=self._map_name)}
+
+    def set_tracker(self, tracker: BaseEmissionsTracker):
+        self._tracker = tracker
+        self._tracker_last_update = time.time()
+
+    @property
+    def current_agent_stats(self) -> AgentStats:
+        return self._agent_stats[self._map_name]
+
+    @property
+    def current_aggregated_episode_stats(self) -> AggregatedEpisodeStats:
+        return self._aggregated_episode_stats[self._map_name]
+
+    @property
+    def checkpoint_path(self) -> Optional[Path]:
+        return self._checkpoint_path
+
+    @checkpoint_path.setter
+    def checkpoint_path(self, checkpoint_path: Union[str|Path]):
+        checkpoint_path = Path(checkpoint_path)
+        self._checkpoint_path = checkpoint_path
+        self._update_checkpoint_paths()
+
+    def _update_checkpoint_paths(self):
+        if self.checkpoint_path is None:
+            self._agent_path = None
+            self._stats_path = None
+        else:
+            self._agent_path = self.checkpoint_path / self._AGENT_FILE
+            self._stats_path = self.checkpoint_path / self._STATS_FILE
+
+    def save(self, checkpoint_path: Union[str|Path] = None):
+        if checkpoint_path is not None:
+            self.checkpoint_path = checkpoint_path
+        elif self.checkpoint_path is None:
+            raise RuntimeError(f"The agent's checkpoint path is None, and no checkpoint path was provided to 'save'. Please provide one of the two.")
+
+        agent_attrs = self._get_agent_attrs()
+
+        with open(self._agent_path, "wb") as f:
+            pickle.dump(agent_attrs, f)
+
+    @classmethod
+    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict) -> Self:
+        checkpoint_path = Path(checkpoint_path)
+        agent_attrs_file = checkpoint_path / cls._AGENT_FILE
+        with open(agent_attrs_file, mode="rb") as f:
+            agent_attrs = pickle.load(f)
+
+        agent_attrs = cls._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
+        agent = cls(**agent_attrs)
+        agent._load_agent_attrs(agent_attrs)
+
+        if agent._current_episode_stats is None or agent._current_episode_stats.map_name != map_name:
+            agent._current_episode_stats = EpisodeStats(map_name=map_name)
+        if map_name not in agent._agent_stats:
+            agent._agent_stats[map_name] = AgentStats(map_name=map_name)
+        if map_name not in agent._aggregated_episode_stats:
+            agent._aggregated_episode_stats[map_name] = AggregatedEpisodeStats(map_name=map_name)
+        if map_name not in agent._episode_stats:
+            agent._episode_stats[map_name] = []
+
+        return agent
+
+    @classmethod
+    def _extract_init_arguments(cls, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
+        return dict(
+            map_name=map_name,
+            map_config=map_config,
+            train=agent_attrs["train"],
+            log_name=agent_attrs["log_name"]
+        )
 
     def _load_agent_attrs(self, agent_attrs: Dict):
+        self._train = agent_attrs["train"]
+        self._exploit = agent_attrs["exploit"]
+        self.checkpoint_path = agent_attrs["checkpoint_path"]
+        self._agent_path = agent_attrs["agent_path"]
+        self._stats_path = agent_attrs["stats_path"]
+        self._agent_stats = agent_attrs["agent_stats"]
+        self._episode_stats = agent_attrs["episode_stats"]
+        self._aggregated_episode_stats = agent_attrs["aggregated_episode_stats"]
         # From SC2's Base agent
         self.reward = agent_attrs["reward"]
         self.episodes = agent_attrs["episodes"]
@@ -67,6 +182,14 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
     def _get_agent_attrs(self):
         return dict(
+            train=self._train,
+            exploit=self._exploit,
+            checkpoint_path=self.checkpoint_path,
+            agent_path=self._agent_path,
+            stats_path=self._stats_path,
+            agent_stats=self._agent_stats,
+            episode_stats=self._episode_stats,
+            aggregated_episode_stats=self._aggregated_episode_stats,
             # From SC2's Base agent
             reward=self.reward,
             episodes=self.episodes,
@@ -77,6 +200,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             log_name=self._log_name,
         )
 
+    def train(self):
+        """Set the agent in training mode."""
+        self._train = True
+        self._exploit = False
+
+    def exploit(self):
+        """Set the agent in training mode."""
+        self._train = False
+        self._exploit = True
+
     def reset(self, **kwargs):
         super().reset(**kwargs)
         self._supply_depot_positions = None
@@ -85,6 +218,13 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._used_supply_depot_positions = None
         self._used_command_center_positions = None
         self._used_barrack_positions = None
+
+        self._current_episode_stats = EpisodeStats(map_name=self._map_name)
+        self.current_agent_stats.episode_count += 1
+
+    @property
+    def is_training(self):
+        return self._train
 
     def _setup_positions(self, obs: TimeStep):
         match self._map_name:
@@ -279,10 +419,45 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         # self._barrack_positions = [pos for pos in self._barrack_positions if pos not in barrack_positions]
 
     def pre_step(self, obs: TimeStep):
-        pass
+        self._current_episode_stats.reward += obs.reward
+        self._current_episode_stats.score = obs.observation.score.score
+        self._current_episode_stats.steps += 1
+        self.current_agent_stats.step_count += 1
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
-        pass
+        if obs.last():
+            emissions = self._tracker.flush() if self._tracker is not None else 0.
+            self.logger.info(f"End of episode - Got extra {emissions} since last update")
+            self._current_episode_stats.emissions += emissions
+            self._tracker_last_update = time.time()
+            self.current_agent_stats.process_episode(self._current_episode_stats)
+            self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
+            self._episode_stats[self._map_name].append(self._current_episode_stats)
+            log_msg_parts = self._get_end_of_episode_info_components()
+            log_msg = " :: ".join(log_msg_parts)
+            self.logger.info(log_msg)
+        else:
+            now = time.time()
+            if (self._tracker is not None) and (now - self._tracker_last_update > self._tracker_update_freq_seconds):
+                emissions = self._tracker.flush()
+                self.logger.info(f"Tracker flush - Got extra {emissions} since last update")
+                self._current_episode_stats.emissions += emissions
+                self._tracker_last_update = now
+
+    def _get_end_of_episode_info_components(self) -> List[str]:
+        return [
+            f"Episode {self.current_agent_stats.episode_count}",
+            f"Mean Rewards ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_rewards:.2f}",
+            f"Mean Rewards (10ep) {self.current_aggregated_episode_stats.mean_rewards_last_n_episodes(n=10):.2f}",
+            f"Mean Score ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_score:.2f}",
+            f"Mean Score (10ep) {self.current_aggregated_episode_stats.mean_score_last_n_episodes(n=10):.2f}",
+            f"Max reward {self.current_aggregated_episode_stats.max_reward:.2f}",
+            f"Max score {self.current_aggregated_episode_stats.max_score:.2f}",
+            f"Episode steps: {self._current_episode_stats.steps}",
+            f"Total steps: {self.current_agent_stats.step_count}",
+            f"Episode emissions: {self._current_episode_stats.emissions}",
+            f"Total emissions: {self.current_agent_stats.total_emissions}",
+        ]
 
     def step(self, obs: TimeStep) -> AllActions:
         self.pre_step(obs)
@@ -295,7 +470,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self.update_command_center_positions(obs)
         self.update_barracks_positions(obs)
 
-        obs = self.preprocess_observation(obs)
         action, action_args = self.select_action(obs)
 
         self.logger.debug(f"[Step {self.steps}] Performing action {action.name} with args: {action_args}")
@@ -306,9 +480,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             return game_action(**action_args)
 
         return game_action()
-
-    def preprocess_observation(self, obs: TimeStep) -> TimeStep:
-        return obs
 
     def available_actions(self, obs: TimeStep) -> List[AllActions]:
         return [a for a in self.agent_actions if self.can_take(obs, a)]
@@ -774,7 +945,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         if idle:
             workers = filter(self.is_idle, workers)
         elif harvesting:
-            workers = filter(lambda w: w.order_id_0 in self.HARVEST_ACTIONS, workers)
+            workers = filter(lambda w: w.order_id_0 in Constants.HARVEST_ACTIONS, workers)
 
         return list(workers)
 

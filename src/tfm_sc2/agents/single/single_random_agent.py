@@ -4,7 +4,13 @@ from typing import Any, Dict, List, Tuple
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, units
 
-from ...actions import AllActions
+from ...actions import (
+    AllActions,
+    ArmyAttackManagerActions,
+    ArmyRecruitManagerActions,
+    BaseManagerActions,
+    ResourceManagerActions,
+)
 from ...constants import Constants
 from ..base_agent import BaseAgent
 
@@ -17,7 +23,14 @@ class SingleRandomAgent(BaseAgent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.__original_agent_actions = list(AllActions)
+        # self.__original_agent_actions = list(AllActions)
+        self.__original_agent_actions = list(
+            set(
+                list(ResourceManagerActions) +
+                list(BaseManagerActions) +
+                list(ArmyRecruitManagerActions) +
+                list(ArmyAttackManagerActions)
+            ))
         self.__agent_actions = [a for a in self.__original_agent_actions if a in self._map_config["available_actions"]]
 
     @property
@@ -31,7 +44,7 @@ class SingleRandomAgent(BaseAgent):
         action_args, is_valid_action = self._get_action_args(obs=obs, action=action)
 
         if not is_valid_action:
-            self.logger.warning(f"Action {action.name} is not valid anymore, returning NO_OP")
+            self.logger.debug(f"Action {action.name} is not valid anymore, returning NO_OP")
             return AllActions.NO_OP, None
 
         return action, action_args

@@ -11,13 +11,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions, units
+from typing_extensions import Self
 
 from ..actions import AllActions
 from ..constants import Constants, SC2Costs
 from ..networks.dqn_network import DQNNetwork
 from ..networks.experience_replay_buffer import ExperienceReplayBuffer
 from ..types import Gas, Minerals
-from ..with_tracker import WithTracker
 from .base_agent import BaseAgent
 from .stats import AgentStats, AggregatedEpisodeStats, EpisodeStats
 
@@ -27,6 +27,8 @@ DQNAgentParams = namedtuple('DQNAgentParams',
 
 State = namedtuple('State',
                             field_names=[
+                                # Actions available on the map
+                                "map_actions",
                                 # Command centers
                                 "num_command_centers", "num_completed_command_centers",
                                 "command_center_0_order_length", "command_center_1_order_length", "command_center_2_order_length", "command_center_3_order_length",
@@ -68,17 +70,18 @@ State = namedtuple('State',
                                 "enemy_num_buildings", "enemy_total_building_health", "enemy_num_workers", "enemy_num_army_units", "enemy_total_army_health",
                             ])
 
-class DQNAgent(WithTracker, BaseAgent):
+class DQNAgent(BaseAgent):
     _MAIN_NETWORK_FILE: str = "main_network.pt"
     _TARGET_NETWORK_FILE: str = "target_network.pt"
-    _AGENT_FILE: str = "agent.pkl"
-    _STATS_FILE: str =  "stats.parquet"
+    # _AGENT_FILE: str = "agent.pkl"
+    # _STATS_FILE: str =  "stats.parquet"
 
     def __init__(self, main_network: DQNNetwork, buffer: ExperienceReplayBuffer,
                  hyperparams: DQNAgentParams,
                  target_network: DQNNetwork = None,
-                 train: bool = True,
-                 checkpoint_path: Union[str|Path] = None,
+                 random_mode: bool = False,
+                #  train: bool = True,
+                #  checkpoint_path: Union[str|Path] = None,
                  **kwargs
                  ):
         """Deep Q-Network agent.
@@ -102,12 +105,8 @@ class DQNAgent(WithTracker, BaseAgent):
         self.hyperparams = hyperparams
         self.initial_epsilon = hyperparams.epsilon
         self.epsilon = hyperparams.epsilon
-        self._train = train
-        self._exploit = not train
-
-        self.initialize()
-#         torch.nn.MSELoss()
         self.loss = self.hyperparams.loss or torch.nn.HuberLoss()
+        self._random_mode = random_mode
 
         # Placeholders
         self._action_to_idx = None
@@ -120,101 +119,58 @@ class DQNAgent(WithTracker, BaseAgent):
         self.__prev_action = None
         self.__prev_action_args = None
 
-        if checkpoint_path is not None:
-            self.__checkpoint_path = Path(checkpoint_path)
-            self.__checkpoint_path.mkdir(exist_ok=True, parents=True)
-            self.__main_network_path = self.__checkpoint_path / self._MAIN_NETWORK_FILE
-            self.__target_network_path = self.__checkpoint_path / self._TARGET_NETWORK_FILE
-            self.__agent_path = self.__checkpoint_path / self._AGENT_FILE
-            self.__stats_path = self.__checkpoint_path / self._STATS_FILE
-        else:
-            self.__checkpoint_path = None
-            self.__main_network_path = None
-            self.__target_network_path = None
-            self.__agent_path = None
-            self.__stats_path = None
-
-        self.__flags = dict(
+        # Add some extra flags to the default ones (train / exploit)
+        self._status_flags.update(dict(
             burnin_started=False,
-            train_started=False,
-            exploit_started=False,
             main_net_updated=False,
             target_net_updated=False,
-        )
+        ))
+
+        if self._checkpoint_path is not None:
+            self._main_network_path = self._checkpoint_path / self._MAIN_NETWORK_FILE
+            self._target_network_path = self._checkpoint_path / self._TARGET_NETWORK_FILE
+        else:
+            self._main_network_path = None
+            self._target_network_path = None
+
+    def _update_checkpoint_paths(self):
+        super()._update_checkpoint_paths()
+        if self.checkpoint_path is None:
+            self._main_network_path = None
+            self._target_network_path = None
+        else:
+            self._main_network_path = self.checkpoint_path / self._MAIN_NETWORK_FILE
+            self._target_network_path = self.checkpoint_path / self._TARGET_NETWORK_FILE
 
     @classmethod
-    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict) -> "DQNAgent":
-        checkpoint_path = Path(checkpoint_path)
-        agent_attrs_file = checkpoint_path / cls._AGENT_FILE
-        with open(agent_attrs_file, mode="rb") as f:
-            agent_attrs = pickle.load(f)
-
-        dqn_agent_attrs = dict(
+    def _extract_init_arguments(cls, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
+        parent_attrs = super()._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
+        return dict(
+            **parent_attrs,
             main_network=torch.load(agent_attrs["main_network_path"]),
             target_network=torch.load(agent_attrs["target_network_path"]),
             buffer=agent_attrs["buffer"],
-            hyperparams=agent_attrs["hyperparams"],
-            train=agent_attrs["train"],
-            log_name=agent_attrs["log_name"]
+            random_model=agent_attrs["random_mode"],
+            hyperparams=agent_attrs["hyperparams"]
         )
-        parent_attrs = dict(
-            map_name=map_name,
-            map_config=map_config,
-        )
-        agent = cls(**dqn_agent_attrs, **parent_attrs)
-        agent._load_agent_attrs(agent_attrs)
-
-        if agent._current_episode_stats is None or agent._current_episode_stats.map_name != map_name:
-            agent._current_episode_stats = EpisodeStats(map_name=self._map_name)
-        if map_name not in agent._agent_stats:
-            agent._agent_stats[map_name] = AgentStats(map_name=map_name)
-        if map_name not in agent._aggregated_episode_stats:
-            agent._aggregated_episode_stats[map_name] = AggregatedEpisodeStats(map_name=map_name)
-        if map_name not in agent._episode_stats:
-            agent._episode_stats[map_name] = []
-
-        return agent
 
     def _load_agent_attrs(self, agent_attrs: Dict):
         super()._load_agent_attrs(agent_attrs)
-        self.__main_network_path = agent_attrs["main_network_path"]
-        self.__target_network_path = agent_attrs["target_network_path"]
+        self._main_network_path = agent_attrs["main_network_path"]
+        self._target_network_path = agent_attrs["target_network_path"]
         self.device = agent_attrs["device"]
         self.initial_epsilon = agent_attrs["initial_epsilon"]
-        self._train = agent_attrs["train"]
-        self._exploit = agent_attrs["exploit"]
-        self._action_to_idx = agent_attrs["action_to_idx"]
-        self._idx_to_action = agent_attrs["idx_to_action"]
+        # self._action_to_idx = agent_attrs["action_to_idx"]
+        # self._idx_to_action = agent_attrs["idx_to_action"]
         self._num_actions = agent_attrs["num_actions"]
         self.__current_state = agent_attrs["current_state"]
         self.__prev_state = agent_attrs["prev_state"]
         self.__prev_reward = agent_attrs["prev_reward"]
         self.__prev_action = agent_attrs["prev_action"]
         self.__prev_action_args = agent_attrs["prev_action_args"]
-        self.__checkpoint_path = agent_attrs["checkpoint_path"]
-        self.__main_network_path = agent_attrs["main_network_path"]
-        self.__target_network_path = agent_attrs["target_network_path"]
-        self.__agent_path = agent_attrs["agent_path"]
-        self.__stats_path = agent_attrs["stats_path"]
-        self.__step_count = agent_attrs["step_count"]
-        self.__episode_count = agent_attrs["episode_count"]
-        self.__update_losses = agent_attrs["update_losses"]
-        self.__episode_rewards = agent_attrs["episode_rewards"]
-        self.__episode_eps = agent_attrs["episode_eps"]
-        self.__mean_rewards = agent_attrs["mean_rewards"]
-        self.__mean_rewards_10 = agent_attrs["mean_rewards_10"]
-        self.__episode_losses = agent_attrs["episode_losses"]
-        self.__episode_steps = agent_attrs["episode_steps"]
-        self.__mean_steps = agent_attrs["mean_steps"]
-        self.__max_episode_rewards = agent_attrs["max_episode_rewards"]
-        self.__current_episode_reward = agent_attrs["current_episode_reward"]
-        self.__current_episode_steps = agent_attrs["current_episode_steps"]
-        self.__current_episode_losses = agent_attrs["current_episode_losses"]
-        self._agent_stats = agent_attrs["agent_stats"]
-        self._episode_stats = agent_attrs["episode_stats"]
-        self._aggregated_episode_stats = agent_attrs["aggregated_episode_stats"]
+        self._main_network_path = agent_attrs["main_network_path"]
+        self._target_network_path = agent_attrs["target_network_path"]
         self.loss = agent_attrs["loss"]
-        self._emissions_per_task = agent_attrs["emissions_per_task"]
 
     def _get_agent_attrs(self):
         parent_attrs = super()._get_agent_attrs()
@@ -222,135 +178,40 @@ class DQNAgent(WithTracker, BaseAgent):
             buffer=self.buffer,
             hyperparams=self.hyperparams,
             initial_epsilon=self.initial_epsilon,
-            train=self._train,
             device=self.device,
-            main_network_path=self.__main_network_path,
-            target_network_path=self.__target_network_path,
-            exploit=self._exploit,
-            action_to_idx=self._action_to_idx,
-            idx_to_action=self._idx_to_action,
+            main_network_path=self._main_network_path,
+            target_network_path=self._target_network_path,
+            # action_to_idx=self._action_to_idx,
+            # idx_to_action=self._idx_to_action,
             num_actions=self._num_actions,
             current_state=self.__current_state,
             prev_state=self.__prev_state,
             prev_reward=self.__prev_reward,
             prev_action=self.__prev_action,
             prev_action_args=self.__prev_action_args,
-            checkpoint_path=self.__checkpoint_path,
-            agent_path=self.__agent_path,
-            stats_path=self.__stats_path,
-            step_count=self.__step_count,
-            episode_count=self.__episode_count,
-            update_losses=self.__update_losses,
-            episode_rewards=self.__episode_rewards,
-            episode_eps=self.__episode_eps,
-            mean_rewards=self.__mean_rewards,
-            mean_rewards_10=self.__mean_rewards_10,
-            episode_losses=self.__episode_losses,
-            agent_stats=self._agent_stats,
-            episode_stats=self._episode_stats,
-            aggregated_episode_stats=self._aggregated_episode_stats,
-            # Steps performed on each episode
-            episode_steps=self.__episode_steps,
-            mean_steps=self.__mean_steps,
-            # Highest reward for any episode
-            max_episode_rewards=self.__max_episode_rewards,
-            current_episode_reward=self.__current_episode_reward,
-            current_episode_steps=self.__current_episode_steps,
-            current_episode_losses=self.__current_episode_losses,
             loss=self.loss,
-            emissions_per_task=self._emissions_per_task,
+            random_model=self._random_mode,
             **parent_attrs
         )
 
-    def train(self):
-        """Set the agent in training mode."""
-        self._train = True
-        self._exploit = False
-
-    def exploit(self):
-        """Set the agent in training mode."""
-        self._train = False
-        self._exploit = True
-
-    def save(self, checkpoint_path: Union[str|Path] = None) -> "DQNAgent":
-        if checkpoint_path is not None:
-            checkpoint_path = Path(checkpoint_path)
-            self.__checkpoint_path = checkpoint_path
-            self.__main_network_path = self.__checkpoint_path / self._MAIN_NETWORK_FILE
-            self.__target_network_path = self.__checkpoint_path / self._TARGET_NETWORK_FILE
-            self.__agent_path = self.__checkpoint_path / self._AGENT_FILE
-            self.__stats_path = self.__checkpoint_path / self._STATS_FILE
-        elif self.__checkpoint_path is None:
-            raise RuntimeError(f"The agent's checkpoint path is None, and no checkpoint path was provided to 'save'. Please provide one of the two.")
-
-        torch.save(self.main_network, self.__main_network_path)
-        torch.save(self.target_network, self.__target_network_path)
-        agent_attrs = self._get_agent_attrs()
-
-        with open(self.__agent_path, "wb") as f:
-            pickle.dump(agent_attrs, f)
-
-    def initialize(self):
-        # This should be exactly the same as self.steps (implemented by pysc2 base agent)
-        self.__step_count = 0
-        self.__episode_count = 0
-        # Loss on each update
-        self.__update_losses = []
-        # Rewards at the end of each episode
-        self.__episode_rewards = []
-        # Eps value at the end of each episode
-        self.__episode_eps = []
-        # Mean rewards at the end of each episode
-        self.__mean_rewards = []
-        # Rolling average of the rewards of the last 10 episodes
-        self.__mean_rewards_10 = []
-        # Loss on each episode
-        self.__episode_losses = []
-        # Steps performed on each episode
-        self.__episode_steps = []
-        # Average number of steps per episode
-        self.__mean_steps = []
-        # Highest reward for any episode
-        self.__max_episode_rewards = None
-        self.__current_episode_reward = 0
-        self.__current_episode_steps = 0
-        self.__current_episode_losses = []
-
-        self._current_episode_stats = EpisodeStats(map_name=self._map_name)
-
-        self._episode_stats = {self._map_name: []}
-        self._aggregated_episode_stats = {self._map_name: AggregatedEpisodeStats(map_name=self._map_name)}
-        self._agent_stats = {self._map_name: AgentStats(map_name=self._map_name)}
-
-    @property
-    def current_agent_stats(self) -> AgentStats:
-        return self._agent_stats[self._map_name]
-
-    @property
-    def current_aggregated_episode_stats(self) -> AggregatedEpisodeStats:
-        return self._aggregated_episode_stats[self._map_name]
+    def save(self, checkpoint_path: Union[str|Path] = None):
+        super().save(checkpoint_path=checkpoint_path)
+        torch.save(self.main_network, self._main_network_path)
+        torch.save(self.target_network, self._target_network_path)
 
     def reset(self, **kwargs):
         """Initialize the agent."""
         super().reset(**kwargs)
-        self.__episode_count += 1
         # Last observation
         self.__prev_state = None
         self.__prev_reward = None
         self.__prev_action = None
         self.__prev_action_args = None
         self.__current_state = None
-        # self.__current_episode_reward = 0
-        # self.__current_episode_stats = EpisodeStats(map_name=self._map_name)
-        # # This should be exactly the same as self.steps (implemented by pysc2 base agent)
-        # self.__current_episode_steps = 0
-        # self.__current_episode_losses = []
-        self._current_episode_stats = EpisodeStats(map_name=self._map_name)
-        self.current_agent_stats.episode_count += 1
 
     @property
     def is_training(self):
-        return self._train and (self.buffer.burn_in_capacity >= 1)
+        return super().is_training and (not self._random_mode) and (self.buffer.burn_in_capacity >= 1)
 
     def _convert_obs_to_state(self, obs: TimeStep) -> torch.Tensor:
         building_state = self._get_buildings_state(obs)
@@ -363,6 +224,7 @@ class DQNAgent(WithTracker, BaseAgent):
         # Enemy
 
         return torch.Tensor(State(
+            map_actions=self._map_actions,
 			**building_state,
 			**worker_state,
 			**army_state,
@@ -395,27 +257,27 @@ class DQNAgent(WithTracker, BaseAgent):
 
         self.logger.debug(f"Available actions: {available_actions}")
         # One-hot encoded version of available actions
-        valid_actions = self._actions_to_network(available_actions)
-        if self._train and (self.buffer.burn_in_capacity < 1):
-            if not self.__flags["burnin_started"]:
-                self.start_task("training_burnin")
+        # valid_actions = self._actions_to_network(available_actions)
+        if (self._random_mode) or (self._train and (self.buffer.burn_in_capacity < 1)):
+            if not self._status_flags["burnin_started"]:
                 self.logger.info(f"Starting burn-in")
-                self.__flags["burnin_started"] = True
-            self.logger.debug(f"Burn in capacity: {100 * self.buffer.burn_in_capacity:.2f}%")
-            raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
+                self._status_flags["burnin_started"] = True
+            if self._random_mode:
+                self.logger.debug(f"Random mode - collecting experience from random actions")
+            else:
+                self.logger.debug(f"Burn in capacity: {100 * self.buffer.burn_in_capacity:.2f}%")
+            # raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
+            raw_action = self.main_network.get_random_action()
         elif self.is_training:
-            if not self.__flags["train_started"]:
-                self.stop_task()
-                self.start_task("training")
+            if not self._status_flags["train_started"]:
                 self.logger.info(f"Starting training")
-                self.__flags["train_started"] = True
-            raw_action = self.main_network.get_action(self.__current_state, epsilon=self.epsilon, valid_actions=valid_actions)
+                self._status_flags["train_started"] = True
+            # raw_action = self.main_network.get_action(self.__current_state, epsilon=self.epsilon, valid_actions=valid_actions)
+            raw_action = self.main_network.get_action(self.__current_state, epsilon=self.epsilon)
         else:
-            if not self.__flags["exploit_started"]:
-                self.stop_task()
-                self.start_task("exploit")
+            if not self._status_flags["exploit_started"]:
                 self.logger.info(f"Starting exploit")
-                self.__flags["exploit_started"] = True
+                self._status_flags["exploit_started"] = True
             # When exploiting, do not use the invalid action masking
             raw_action = self.main_network.get_greedy_action(self.__current_state)
 
@@ -425,7 +287,7 @@ class DQNAgent(WithTracker, BaseAgent):
         action_args, is_valid_action = self._get_action_args(obs=obs, action=action)
 
         if not is_valid_action:
-            self.logger.warning(f"Action {action.name} is not valid anymore, returning NO_OP")
+            self.logger.debug(f"Action {action.name} is not valid anymore, returning NO_OP")
             return AllActions.NO_OP, None
 
         return action, action_args
@@ -439,8 +301,9 @@ class DQNAgent(WithTracker, BaseAgent):
         self.current_agent_stats.step_count += 1
 
         if obs.first():
-            self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
-            self._action_to_idx = { action: idx for idx, action in enumerate(self.agent_actions) }
+            self._idx_to_action = { idx: action for idx, action in enumerate(list(AllActions)) }
+            self._action_to_idx = { action: idx for idx, action in enumerate(list(AllActions)) }
+            self._map_actions = self._actions_to_network(self._map_config["available_actions"])
             self._num_actions = len(self.agent_actions)
         else:
             # do updates
@@ -449,16 +312,16 @@ class DQNAgent(WithTracker, BaseAgent):
 
             if self.is_training:
                 updated = False
-                if (self.__current_episode_steps % self.hyperparams.main_network_update_frequency) == 0:
-                    if not self.__flags["main_net_updated"]:
+                if (self._current_episode_stats.steps % self.hyperparams.main_network_update_frequency) == 0:
+                    if not self._status_flags["main_net_updated"]:
                         self.logger.info(f"First main network update")
-                        self.__flags["main_net_updated"] = True
+                        self._status_flags["main_net_updated"] = True
                     self._current_episode_stats.losses = self.update_main_network(self._current_episode_stats.losses)
                     updated = True
-                if (self.__current_episode_steps % self.hyperparams.target_network_sync_frequency) == 0:
-                    if not self.__flags["target_net_updated"]:
+                if (self._current_episode_stats.steps % self.hyperparams.target_network_sync_frequency) == 0:
+                    if not self._status_flags["target_net_updated"]:
                         self.logger.info(f"First target network update")
-                        self.__flags["target_net_updated"] = True
+                        self._status_flags["target_net_updated"] = True
                     self.synchronize_target_network()
                 # HERE
 
@@ -472,24 +335,17 @@ class DQNAgent(WithTracker, BaseAgent):
             elif self._exploit:
                 self._current_episode_stats.epsilon = 0.
 
-
-            if done:
-                self.current_agent_stats.total_reward += self._current_episode_stats.reward
-                self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
-                self._episode_stats[self._map_name].append(self._current_episode_stats)
-                print(
-                    f"\rEpisode {self.current_agent_stats.episode_count} :: "
-                    + f"Mean Rewards ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_rewards:.2f} :: "
-                    + f"Mean Rewards (10ep) {self.current_aggregated_episode_stats.mean_rewards_last_n_episodes(n=10):.2f} :: "
-                    + f"Epsilon {self._current_episode_stats.epsilon:.4f} :: "
-                    + f"Max reward {self.current_aggregated_episode_stats.max_reward:.2f} :: "
-                    + f"Episode steps: {self._current_episode_stats.steps} :: "
-                    + f"Total steps: {self.current_agent_stats.step_count}\t\t\t\t", end="")
-
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
+        super().post_step(obs, action, action_args)
         self.__prev_state = self.__current_state
         self.__prev_action = self._action_to_idx[action]
         self.__prev_action_args = action_args
+
+    def _get_end_of_episode_info_components(self) -> List[str]:
+        return super()._get_end_of_episode_info_components() + [
+            f"Epsilon {self._current_episode_stats.epsilon:.4f}",
+            f"Mean Loss ({len(self._current_episode_stats.losses)} updates) {self._current_episode_stats.mean_loss:.4f}",
+        ]
 
     def _calculate_loss(self, batch: Iterable[Tuple]) -> torch.Tensor:
         """Calculate the loss for a batch.
@@ -501,7 +357,7 @@ class DQNAgent(WithTracker, BaseAgent):
             torch.Tensor: The calculated loss between the calculated and the predicted values.
         """
 
-        # Separem les variables de l'experiència i les convertim a tensors
+        # Convert elements from the replay buffer to tensors
         states, actions, action_args, rewards, dones, next_states = [i for i in batch]
         states = torch.stack(states).to(device=self.device)
         next_states = torch.stack(next_states).to(device=self.device)
@@ -509,13 +365,14 @@ class DQNAgent(WithTracker, BaseAgent):
         actions_vals = torch.LongTensor(np.array(actions)).to(device=self.device).reshape(-1,1)
         dones_t = torch.BoolTensor(dones).to(device=self.device)
 
-        # Obtenim els valors de Q de la xarxa principal
+        # Get q-values from the main network
         qvals = torch.gather(self.main_network.get_qvals(states), 1, actions_vals)
-        # Obtenim els valors de Q de la xarxa objectiu
-        # El paràmetre detach() evita que aquests valors actualitzin la xarxa objectiu
+        # Get q-values from the target network
         qvals_next = torch.max(self.target_network.get_qvals(next_states), dim=-1)[0].detach()
-        qvals_next[dones_t] = 0 # 0 en estats terminals
+        # Set terminal states to 0
+        qvals_next[dones_t] = 0
 
+        # Get expected q-values
         expected_qvals = self.hyperparams.gamma * qvals_next + rewards_vals
 
         return self.loss(qvals, expected_qvals.reshape(-1,1))
@@ -546,7 +403,6 @@ class DQNAgent(WithTracker, BaseAgent):
         else:
             loss = loss.detach().numpy()
 
-        self.__update_losses.append(loss)
         episode_losses.append(float(loss))
         return episode_losses
 
@@ -623,7 +479,7 @@ class DQNAgent(WithTracker, BaseAgent):
 
     def _get_workers_state(self, obs: TimeStep) -> Dict[str, int|float]:
         workers = self.get_workers(obs)
-        num_harvesters = len([w for w in workers if w.order_id_0 in self.HARVEST_ACTIONS])
+        num_harvesters = len([w for w in workers if w.order_id_0 in Constants.HARVEST_ACTIONS])
         refineries = self.get_self_units(obs, unit_types=units.Terran.Refinery)
         num_gas_harvesters = sum(map(lambda r: r.assigned_harvesters, refineries))
         num_mineral_harvesters = num_harvesters - num_gas_harvesters
