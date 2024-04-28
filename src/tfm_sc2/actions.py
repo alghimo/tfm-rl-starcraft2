@@ -33,8 +33,8 @@ class GameManagerActions(IntEnum):
 class ResourceManagerActions(IntEnum):
     NO_OP            = AllActions.NO_OP
     HARVEST_MINERALS = AllActions.HARVEST_MINERALS
-    COLLECT_GAS      = AllActions.COLLECT_GAS
-    BUILD_REFINERY   = AllActions.BUILD_REFINERY
+    # COLLECT_GAS      = AllActions.COLLECT_GAS
+    # BUILD_REFINERY   = AllActions.BUILD_REFINERY
 
 class BaseManagerActions(IntEnum):
     NO_OP                = AllActions.NO_OP
@@ -52,7 +52,7 @@ class ArmyRecruitManagerActions(IntEnum):
 class ArmyAttackManagerActions(IntEnum):
     NO_OP                     = AllActions.NO_OP
     ATTACK_WITH_SINGLE_UNIT   = AllActions.ATTACK_WITH_SINGLE_UNIT
-    ATTACK_WITH_SQUAD_5       = AllActions.ATTACK_WITH_SQUAD_5
-    ATTACK_WITH_SQUAD_10      = AllActions.ATTACK_WITH_SQUAD_10
-    ATTACK_WITH_SQUAD_15      = AllActions.ATTACK_WITH_SQUAD_15
-    ATTACK_WITH_FULL_ARMY     = AllActions.ATTACK_WITH_FULL_ARMY
+    # ATTACK_WITH_SQUAD_5       = AllActions.ATTACK_WITH_SQUAD_5
+    # ATTACK_WITH_SQUAD_10      = AllActions.ATTACK_WITH_SQUAD_10
+    # ATTACK_WITH_SQUAD_15      = AllActions.ATTACK_WITH_SQUAD_15
+    # ATTACK_WITH_FULL_ARMY     = AllActions.ATTACK_WITH_FULL_ARMY
