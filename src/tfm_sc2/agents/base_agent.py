@@ -35,18 +35,19 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     _action_to_game = {
         AllActions.NO_OP: actions.RAW_FUNCTIONS.no_op,
         AllActions.HARVEST_MINERALS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
-        AllActions.COLLECT_GAS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
-        AllActions.BUILD_REFINERY: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Build_Refinery_pt("now", source_unit_tag, target_unit_tag),
+        # AllActions.COLLECT_GAS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
+        # AllActions.BUILD_REFINERY: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Build_Refinery_pt("now", source_unit_tag, target_unit_tag),
         AllActions.RECRUIT_SCV: lambda source_unit_tag: actions.RAW_FUNCTIONS.Train_SCV_quick("now", source_unit_tag),
         AllActions.BUILD_SUPPLY_DEPOT: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_SupplyDepot_pt("now", source_unit_tag, target_position),
         AllActions.BUILD_COMMAND_CENTER: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", source_unit_tag, target_position),
         AllActions.BUILD_BARRACKS: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_Barracks_pt("now", source_unit_tag, target_position),
         AllActions.RECRUIT_MARINE: lambda source_unit_tag: actions.RAW_FUNCTIONS.Train_Marine_quick("now", source_unit_tag),
-        AllActions.ATTACK_WITH_SINGLE_UNIT: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tag, target_unit_tag),
-        AllActions.ATTACK_WITH_SQUAD_5: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
-        AllActions.ATTACK_WITH_SQUAD_10: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
-        AllActions.ATTACK_WITH_SQUAD_15: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
-        AllActions.ATTACK_WITH_FULL_ARMY: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag)
+        AllActions.ATTACK_WITH_SINGLE_UNIT: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Attack_pt("now", source_unit_tag, target_position),
+        # AllActions.ATTACK_WITH_SINGLE_UNIT: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tag, target_unit_tag),
+        # AllActions.ATTACK_WITH_SQUAD_5: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
+        # AllActions.ATTACK_WITH_SQUAD_10: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
+        # AllActions.ATTACK_WITH_SQUAD_15: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
+        # AllActions.ATTACK_WITH_FULL_ARMY: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag)
     }
 
     def __init__(self, map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10, **kwargs):
@@ -294,27 +295,27 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     idle_workers = self.get_idle_workers(obs)
                     closest_worker, closest_mineral = self.select_closest_worker(obs, idle_workers, command_centers, minerals)
                     action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_mineral.tag)
-                case AllActions.BUILD_REFINERY:
-                    geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
-                    command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
-                    workers = self.get_idle_workers(obs)
-                    if len(workers) == 0:
-                        workers = self.get_harvester_workers(obs)
+                # case AllActions.BUILD_REFINERY:
+                #     geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
+                #     command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                #     workers = self.get_idle_workers(obs)
+                #     if len(workers) == 0:
+                #         workers = self.get_harvester_workers(obs)
 
-                    if len(command_centers) == 0:
-                        # Only takes into account distance between workers and geysers
-                        closest_worker, closest_geyser = self.select_closest_worker_to_resource(obs, workers, geysers)
-                    else:
-                        # Takes into account the distance from the worker to the command center and from the command center to the geyser
-                        closest_worker, closest_geyser = self.select_closest_worker(obs, workers, command_centers, geysers)
-                    action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_geyser.tag)
-                case AllActions.COLLECT_GAS:
-                    refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
-                    command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
-                    idle_workers = self.get_idle_workers(obs)
+                #     if len(command_centers) == 0:
+                #         # Only takes into account distance between workers and geysers
+                #         closest_worker, closest_geyser = self.select_closest_worker_to_resource(obs, workers, geysers)
+                #     else:
+                #         # Takes into account the distance from the worker to the command center and from the command center to the geyser
+                #         closest_worker, closest_geyser = self.select_closest_worker(obs, workers, command_centers, geysers)
+                #     action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_geyser.tag)
+                # case AllActions.COLLECT_GAS:
+                #     refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
+                #     command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                #     idle_workers = self.get_idle_workers(obs)
 
-                    closest_worker, closest_refinery = self.select_closest_worker(obs, idle_workers, command_centers, refineries)
-                    action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_refinery.tag)
+                #     closest_worker, closest_refinery = self.select_closest_worker(obs, idle_workers, command_centers, refineries)
+                #     action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_refinery.tag)
                 case AllActions.RECRUIT_SCV:
                     command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
                     command_centers = [cc for cc in command_centers if cc.order_length < Constants.COMMAND_CENTER_QUEUE_LENGTH]
@@ -349,34 +350,46 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     action_args = dict(source_unit_tag=random.choice(barracks).tag)
                 case AllActions.ATTACK_WITH_SINGLE_UNIT:
                     idle_marines = self.get_idle_marines(obs)
-                    enemies = self.get_enemy_units(obs)
+                    enemies = self.get_enemy_units(obs, unit_types=Constants.BUILDING_UNIT_TYPES)
+                    if len(enemies) == 0:
+                        enemies = self.get_enemy_units(obs)
+                    enemy_positions = [Position(e.x, e.y) for e in enemies]
+                    assert any(enemy_positions), "No enemies to attack"
+                    mean_enemy_position = np.mean(enemy_positions, axis=0)
+                    target_position = Position(int(mean_enemy_position[0]), int(mean_enemy_position[1]))
                     marine_tag = random.choice(idle_marines).tag
                     enemy_tag = random.choice(enemies).tag
-                    action_args = dict(source_unit_tag=marine_tag, target_unit_tag=enemy_tag)
-                case AllActions.ATTACK_WITH_SQUAD_5:
-                    idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                    enemies = self.get_enemy_units(obs)
-                    enemy_tag = random.choice(enemies).tag
-                    marine_tags = random.sample(idle_marines, k=5)
-                    action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
-                case AllActions.ATTACK_WITH_SQUAD_10:
-                    idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                    enemies = self.get_enemy_units(obs)
-                    enemy_tag = random.choice(enemies).tag
-                    marine_tags = random.sample(idle_marines, k=10)
-                    action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
-                case AllActions.ATTACK_WITH_SQUAD_15:
-                    idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                    enemies = self.get_enemy_units(obs)
-                    enemy_tag = random.choice(enemies).tag
-                    marine_tags = random.sample(idle_marines, k=15)
-                    action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
-                case AllActions.ATTACK_WITH_FULL_ARMY:
-                    idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                    assert len(idle_marines) > 0, "Can't attack with no units"
-                    enemies = self.get_enemy_units(obs)
-                    enemy_tag = random.choice(enemies).tag
-                    action_args = dict(source_unit_tags=idle_marines, target_unit_tag=enemy_tag)
+                    action_args = dict(source_unit_tag=marine_tag, target_position=target_position)
+                # case AllActions.ATTACK_WITH_SINGLE_UNIT:
+                #     idle_marines = self.get_idle_marines(obs)
+                #     enemies = self.get_enemy_units(obs)
+                #     marine_tag = random.choice(idle_marines).tag
+                #     enemy_tag = random.choice(enemies).tag
+                #     action_args = dict(source_unit_tag=marine_tag, target_unit_tag=enemy_tag)
+                # case AllActions.ATTACK_WITH_SQUAD_5:
+                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                #     enemies = self.get_enemy_units(obs)
+                #     enemy_tag = random.choice(enemies).tag
+                #     marine_tags = random.sample(idle_marines, k=5)
+                #     action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
+                # case AllActions.ATTACK_WITH_SQUAD_10:
+                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                #     enemies = self.get_enemy_units(obs)
+                #     enemy_tag = random.choice(enemies).tag
+                #     marine_tags = random.sample(idle_marines, k=10)
+                #     action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
+                # case AllActions.ATTACK_WITH_SQUAD_15:
+                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                #     enemies = self.get_enemy_units(obs)
+                #     enemy_tag = random.choice(enemies).tag
+                #     marine_tags = random.sample(idle_marines, k=15)
+                #     action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
+                # case AllActions.ATTACK_WITH_FULL_ARMY:
+                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
+                #     assert len(idle_marines) > 0, "Can't attack with no units"
+                #     enemies = self.get_enemy_units(obs)
+                #     enemy_tag = random.choice(enemies).tag
+                #     action_args = dict(source_unit_tags=idle_marines, target_unit_tag=enemy_tag)
                 case _:
                     raise RuntimeError(f"Missing logic to select action args for action {action}")
 
@@ -629,86 +642,86 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
                 self.logger.debug(f"[Action {action.name} ({action}) without position] There are minerals available, but the player has no SCVs.")
                 return False
-            case AllActions.COLLECT_GAS, args if _has_target_unit_tag(args):
-                target_unit_tag = args["target_unit_tag"]
-                self.logger.debug(f"Checking action {action.name} ({action}) with position")
-                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
-                if not any(command_centers):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
-                    return False
+            # case AllActions.COLLECT_GAS, args if _has_target_unit_tag(args):
+            #     target_unit_tag = args["target_unit_tag"]
+            #     self.logger.debug(f"Checking action {action.name} ({action}) with position")
+            #     command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+            #     if not any(command_centers):
+            #         self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
+            #         return False
 
-                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich], unit_tags=target_unit_tag)
+            #     refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich], unit_tags=target_unit_tag)
 
-                if len(refineries) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] There are no refineries to harvest at position {position}")
-                    return False
+            #     if len(refineries) == 0:
+            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are no refineries to harvest at position {position}")
+            #         return False
 
-                if self.has_idle_workers(obs):
-                    return True
-                # TODO Add check for workers harvesting minerals
+            #     if self.has_idle_workers(obs):
+            #         return True
+            #     # TODO Add check for workers harvesting minerals
 
-                self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
-                return False
-            case AllActions.COLLECT_GAS, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) with no position")
-                command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
-                if not any(command_centers):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
-                    return False
+            #     self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
+            #     return False
+            # case AllActions.COLLECT_GAS, _:
+            #     self.logger.debug(f"Checking action {action.name} ({action}) with no position")
+            #     command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
+            #     if not any(command_centers):
+            #         self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
+            #         return False
 
-                refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
-                refineries = [unit.tag for unit in refineries]
-                if not any(refineries):
-                    self.logger.debug(f"[Action {action.name} ({action}) without position] There are no refineries on the map")
-                    return False
+            #     refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
+            #     refineries = [unit.tag for unit in refineries]
+            #     if not any(refineries):
+            #         self.logger.debug(f"[Action {action.name} ({action}) without position] There are no refineries on the map")
+            #         return False
 
-                if self.has_idle_workers(obs):
-                    return True
-                # elif self.has_workers(obs):
-                #     return True
-                # TODO Add check for workers harvesting minerals
+            #     if self.has_idle_workers(obs):
+            #         return True
+            #     # elif self.has_workers(obs):
+            #     #     return True
+            #     # TODO Add check for workers harvesting minerals
 
-                self.logger.debug(f"[Action {action.name} ({action}) without position] There are refineries, but the player has no workers.")
-                return False
+            #     self.logger.debug(f"[Action {action.name} ({action}) without position] There are refineries, but the player has no workers.")
+            #     return False
             # TODO Add this check
             # case AllActions.BUILD_REFINERY, args if _has_source_unit_tag(args) and _has_target_unit_tag(args):
-            case AllActions.BUILD_REFINERY, args if _has_target_unit_tag(args):
-                target_unit_tag = args["target_unit_tag"]
-                geysers = [unit.tag for unit in obs.observation.raw_units if unit.tag == target_unit_tag and Gas.contains(unit.unit_type)]
-                if not any(geysers):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] There are no vespene geysers at position {position} (or they already have a structure)")
-                    return False
+            # case AllActions.BUILD_REFINERY, args if _has_target_unit_tag(args):
+            #     target_unit_tag = args["target_unit_tag"]
+            #     geysers = [unit.tag for unit in obs.observation.raw_units if unit.tag == target_unit_tag and Gas.contains(unit.unit_type)]
+            #     if not any(geysers):
+            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are no vespene geysers at position {position} (or they already have a structure)")
+            #         return False
 
-                if not SC2Costs.REFINERY.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] There are is a vespene geyser at position {position} but the player can't pay the cost ({SC2Costs.REFINERY})")
-                    return False
+            #     if not SC2Costs.REFINERY.can_pay(obs.observation.player):
+            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are is a vespene geyser at position {position} but the player can't pay the cost ({SC2Costs.REFINERY})")
+            #         return False
 
-                if self.has_idle_workers(obs):
-                    return True
-                elif self.has_harvester_workers(obs):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] Player has no idle SCVs, but has other available workers harvesting.")
-                    return True
+            #     if self.has_idle_workers(obs):
+            #         return True
+            #     elif self.has_harvester_workers(obs):
+            #         self.logger.debug(f"[Action {action.name} ({action}) + position] Player has no idle SCVs, but has other available workers harvesting.")
+            #         return True
 
-                self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has a vespene geyser and the player can pay the cust, but the player has no SCVs.")
-                return False
-            case AllActions.BUILD_REFINERY, _:
-                geysers = [unit.tag for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
-                if not any(geysers):
-                    self.logger.debug(f"[Action {action.name} ({action}) without position] There are no vespene geysers on the map(or they already have a structure)")
-                    return False
+            #     self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has a vespene geyser and the player can pay the cust, but the player has no SCVs.")
+            #     return False
+            # case AllActions.BUILD_REFINERY, _:
+            #     geysers = [unit.tag for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
+            #     if not any(geysers):
+            #         self.logger.debug(f"[Action {action.name} ({action}) without position] There are no vespene geysers on the map(or they already have a structure)")
+            #         return False
 
-                if not SC2Costs.REFINERY.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action}) without position] There are are vespene geysers available but the player can't pay the cost ({SC2Costs.REFINERY})")
-                    return False
+            #     if not SC2Costs.REFINERY.can_pay(obs.observation.player):
+            #         self.logger.debug(f"[Action {action.name} ({action}) without position] There are are vespene geysers available but the player can't pay the cost ({SC2Costs.REFINERY})")
+            #         return False
 
-                if self.has_idle_workers(obs):
-                    return True
-                elif self.has_workers(obs):
-                    self.logger.debug(f"[Action {action.name} ({action}) without position] Player has no idle SCVs, but has other available SCVs.")
-                    return True
+            #     if self.has_idle_workers(obs):
+            #         return True
+            #     elif self.has_workers(obs):
+            #         self.logger.debug(f"[Action {action.name} ({action}) without position] Player has no idle SCVs, but has other available SCVs.")
+            #         return True
 
-                self.logger.debug(f"[Action {action.name} ({action}) without position] There are free vespene geysers and the player can pay the cust, but the player has no SCVs.")
-                return False
+            #     self.logger.debug(f"[Action {action.name} ({action}) without position] There are free vespene geysers and the player can pay the cust, but the player has no SCVs.")
+            #     return False
             case AllActions.RECRUIT_SCV, args if _has_source_unit_tag(args):
                 command_center_tag = args["source_unit_tag"]
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter, unit_tags=command_center_tag)
@@ -820,54 +833,54 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     return False
 
                 return True
-            case AllActions.ATTACK_WITH_SQUAD_5, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-                idle_marines = self.get_idle_marines(obs)
-                if len(idle_marines) < 5:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has less than 5 idle marines")
-                    return False
-                enemies = self.get_enemy_units(obs)
-                if len(enemies) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-                    return False
+            # case AllActions.ATTACK_WITH_SQUAD_5, _:
+            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
+            #     idle_marines = self.get_idle_marines(obs)
+            #     if len(idle_marines) < 5:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The player has less than 5 idle marines")
+            #         return False
+            #     enemies = self.get_enemy_units(obs)
+            #     if len(enemies) == 0:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+            #         return False
 
-                return True
-            case AllActions.ATTACK_WITH_SQUAD_10, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-                idle_marines = self.get_idle_marines(obs)
-                if len(idle_marines) < 10:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has less than 10 idle marines")
-                    return False
-                enemies = self.get_enemy_units(obs)
-                if len(enemies) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-                    return False
+            #     return True
+            # case AllActions.ATTACK_WITH_SQUAD_10, _:
+            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
+            #     idle_marines = self.get_idle_marines(obs)
+            #     if len(idle_marines) < 10:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The player has less than 10 idle marines")
+            #         return False
+            #     enemies = self.get_enemy_units(obs)
+            #     if len(enemies) == 0:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+            #         return False
 
-                return True
-            case AllActions.ATTACK_WITH_SQUAD_15, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-                idle_marines = self.get_idle_marines(obs)
-                if len(idle_marines) < 15:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has less than 15 idle marines")
-                    return False
-                enemies = self.get_enemy_units(obs)
-                if len(enemies) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-                    return False
+            #     return True
+            # case AllActions.ATTACK_WITH_SQUAD_15, _:
+            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
+            #     idle_marines = self.get_idle_marines(obs)
+            #     if len(idle_marines) < 15:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The player has less than 15 idle marines")
+            #         return False
+            #     enemies = self.get_enemy_units(obs)
+            #     if len(enemies) == 0:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+            #         return False
 
-                return True
-            case AllActions.ATTACK_WITH_FULL_ARMY, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-                idle_marines = self.get_idle_marines(obs)
-                if len(idle_marines) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")
-                    return False
-                enemies = self.get_enemy_units(obs)
-                if len(enemies) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-                    return False
+            #     return True
+            # case AllActions.ATTACK_WITH_FULL_ARMY, _:
+            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
+            #     idle_marines = self.get_idle_marines(obs)
+            #     if len(idle_marines) == 0:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")
+            #         return False
+            #     enemies = self.get_enemy_units(obs)
+            #     if len(enemies) == 0:
+            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
+            #         return False
 
-                return True
+            #     return True
             case _:
                 self.logger.warning(f"Action {action.name} ({action}) is not implemented yet")
                 return False

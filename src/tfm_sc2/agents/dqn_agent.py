@@ -28,7 +28,7 @@ DQNAgentParams = namedtuple('DQNAgentParams',
 State = namedtuple('State',
                             field_names=[
                                 # Actions available on the map
-                                "map_actions",
+                                # "map_actions",
                                 # Command centers
                                 "num_command_centers", "num_completed_command_centers",
                                 "command_center_0_order_length", "command_center_1_order_length", "command_center_2_order_length", "command_center_3_order_length",
@@ -224,7 +224,7 @@ class DQNAgent(BaseAgent):
         # Enemy
 
         return torch.Tensor(State(
-            map_actions=self._map_actions,
+            # map_actions=self._map_actions,
 			**building_state,
 			**worker_state,
 			**army_state,
@@ -234,7 +234,7 @@ class DQNAgent(BaseAgent):
             **enemy_state
         )).to(device=self.device)
 
-    def _actions_to_network(self, actions: List[AllActions]) -> List[np.int8]:
+    def _actions_to_network(self, actions: List[AllActions], as_tensor: bool = True) -> List[np.int8]:
         """Converts a list of AllAction elements to a one-hot encoded version that the network can use.
 
         Args:
@@ -249,6 +249,8 @@ class DQNAgent(BaseAgent):
             action_idx = self._action_to_idx[action]
             ohe_actions[action_idx] = 1
 
+        if not as_tensor:
+            return ohe_actions
         return torch.Tensor(ohe_actions).to(device=self.device)
 
 
@@ -301,10 +303,10 @@ class DQNAgent(BaseAgent):
         self.current_agent_stats.step_count += 1
 
         if obs.first():
-            self._idx_to_action = { idx: action for idx, action in enumerate(list(AllActions)) }
-            self._action_to_idx = { action: idx for idx, action in enumerate(list(AllActions)) }
-            self._map_actions = self._actions_to_network(self._map_config["available_actions"])
+            self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
+            self._action_to_idx = { action: idx for idx, action in enumerate(self.agent_actions) }
             self._num_actions = len(self.agent_actions)
+            # self._map_actions = self._actions_to_network(self._map_config["available_actions"], as_tensor=False)
         else:
             # do updates
             done = obs.last()
@@ -337,6 +339,9 @@ class DQNAgent(BaseAgent):
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
         super().post_step(obs, action, action_args)
+        if obs.first():
+            self.__current_state = self._convert_obs_to_state(obs)
+
         self.__prev_state = self.__current_state
         self.__prev_action = self._action_to_idx[action]
         self.__prev_action_args = action_args

@@ -5,8 +5,8 @@ class AllActions(IntEnum):
     NO_OP = 0
     # Resource manager actions
     HARVEST_MINERALS = 11
-    COLLECT_GAS      = 12
-    BUILD_REFINERY   = 13
+    # COLLECT_GAS      = 12
+    # BUILD_REFINERY   = 13
     # Base Manager actions
     RECRUIT_SCV          = 21
     BUILD_SUPPLY_DEPOT   = 22
@@ -19,10 +19,10 @@ class AllActions(IntEnum):
     # ArmyAttack Manager actions
 
     ATTACK_WITH_SINGLE_UNIT   = 41
-    ATTACK_WITH_SQUAD_5       = 42
-    ATTACK_WITH_SQUAD_10      = 43
-    ATTACK_WITH_SQUAD_15      = 44
-    ATTACK_WITH_FULL_ARMY     = 45
+    # ATTACK_WITH_SQUAD_5       = 42
+    # ATTACK_WITH_SQUAD_10      = 43
+    # ATTACK_WITH_SQUAD_15      = 44
+    # ATTACK_WITH_FULL_ARMY     = 45
 
 class GameManagerActions(IntEnum):
     GATHER_RESOURCES = 10
