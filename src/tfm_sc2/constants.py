@@ -92,3 +92,13 @@ class Constants:
         # Legacy of the void
         Protoss.Adept, Protoss.AdeptPhaseShift, Protoss.Disruptor
     ]
+    COMMAND_CENTER_UNIT_TYPES=[
+        Terran.CommandCenter, Terran.CommandCenterFlying,
+        Zerg.Hive,
+        Protoss.Nexus,
+    ]
+    @classmethod
+    def OTHER_BUILDING_UNIT_TYPES(cls):
+        if cls._OTHER_BUILDING_UNIT_TYPES is None:
+            cls._OTHER_BUILDING_UNIT_TYPES = [ut for ut in cls.BUILDING_UNIT_TYPES if ut not in cls.COMMAND_CENTER_UNIT_TYPES]
+        return cls._OTHER_BUILDING_UNIT_TYPES

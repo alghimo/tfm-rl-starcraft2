@@ -3,10 +3,12 @@ import pickle
 import random
 import time
 from abc import ABC, abstractmethod
+from functools import reduce
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
 from codecarbon.emissions_tracker import BaseEmissionsTracker
 from pysc2.agents import base_agent
 from pysc2.env.environment import TimeStep
@@ -150,6 +152,26 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             agent._episode_stats[map_name] = []
 
         return agent
+
+    def save_stats(self, checkpoint_path: Union[str|Path] = None):
+        if checkpoint_path is not None:
+            self.checkpoint_path = checkpoint_path
+        elif self.checkpoint_path is None:
+            raise RuntimeError(f"The agent's checkpoint path is None, and no checkpoint path was provided to 'save'. Please provide one of the two.")
+
+        all_episode_stats = [v for v in self._episode_stats.values()]
+        all_episode_stats = reduce(lambda v1, v2: v1 + v2, all_episode_stats)
+        episode_stats_pd = pd.DataFrame(data=all_episode_stats)
+        episode_stats_pd.to_parquet(self._checkpoint_path / "episode_stats.parquet")
+        all_agent_stats = [v for v in self._episode_stats.values()]
+        all_agent_stats = reduce(lambda v1, v2: v1 + v2, all_agent_stats)
+        agent_stats_pd = pd.DataFrame(data=all_agent_stats)
+        agent_stats_pd.to_parquet(self._checkpoint_path / "agent_stats.parquet")
+
+        all_aggregated_stats = [v for v in self._episode_stats.values()]
+        all_aggregated_stats = reduce(lambda v1, v2: v1 + v2, all_aggregated_stats)
+        aggregated_stats_pd = pd.DataFrame(data=all_aggregated_stats)
+        aggregated_stats_pd.to_parquet(self._checkpoint_path / "aggregated_stats.parquet")
 
     @classmethod
     def _extract_init_arguments(cls, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:

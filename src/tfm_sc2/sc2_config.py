@@ -42,16 +42,16 @@ MAP_CONFIGS = dict(
             "top_left": {
                 units.Terran.CommandCenter: [(23, 72), (57, 31)],
                 units.Terran.SupplyDepot:
-                    [(17, 38), (17, 36), (17, 34), (17, 32), (17, 30), (19, 29), (19, 27), (21, 27), (23, 26), (27, 26)],
+                    [(17, 38), (17, 36), (17, 34), (17, 32), (17, 30)],#, (19, 29), (19, 27), (21, 27), (23, 26), (27, 26)],
                 units.Terran.Barracks:
-                    [(21, 41), (25, 41), (31, 26),]
+                    [(21, 41), (31, 26),] # (25, 41),
             },
             "bottom_right": {
                 units.Terran.CommandCenter: [(23, 72), (57, 31)],
                 units.Terran.SupplyDepot:
-                    [(51, 79), (53, 79), (55, 77), (57, 76), (59, 76), (61, 75), (62, 73), (63, 71), (63, 69), (63, 67), (63, 65), ],
+                    [(51, 79), (53, 79), (55, 77), (57, 76), (59, 76)], #(61, 75), (62, 73), (63, 71), (63, 69), (63, 67), (63, 65), ],
                 units.Terran.Barracks:
-                    [(47, 75), (52, 63), (56, 63),]
+                    [(47, 75), (56, 63),]#(52, 63),
             }
         },
         multiple_positions=True,
@@ -68,7 +68,7 @@ MAP_CONFIGS = dict(
             units.Terran.CommandCenter: [(35, 36)],
             units.Terran.SupplyDepot:
                 [(x, y) for x in range(30, 35, 2) for y in range(29, 32, 2)]
-                + [(x, y) for x in range(30, 35, 2) for y in range(41, 44, 2)]
+                # + [(x, y) for x in range(30, 35, 2) for y in range(41, 44, 2)]
             ,
         },
         multiple_positions=False,

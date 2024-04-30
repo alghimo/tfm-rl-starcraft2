@@ -77,6 +77,9 @@ def main(unused_argv):
         case _:
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:
+        if FLAGS.export_stats_only:
+            agent.save_stats(save_path)
+            return
         finished_episodes = 0
         # We set measure_power_secs to a very high value because we want to flush emissions as we want
         tracker = OfflineEmissionsTracker(country_iso_code="ESP", experiment_id=f"global_{FLAGS.model_id}_{map_name}", measure_power_secs=3600, log_level=logging.WARNING)
@@ -123,6 +126,8 @@ def main(unused_argv):
         else:
             total_emissions = tracker.stop()
             print(f"Total emissions after {finished_episodes} episodes for agent {agent._log_name} (and {len(other_agents)} other agents): {total_emissions:.2f}")
+        if save_agent:
+            agent.save_stats(save_path)
     except KeyboardInterrupt:
         pass
 
@@ -138,5 +143,6 @@ if __name__ == "__main__":
     flags.DEFINE_boolean("exploit", default=False, required=False, help="Use the agent in explotation mode, not for training.")
     flags.DEFINE_boolean("save_agent", default=True, required=False, help="Whether to save the agent and/or its stats.")
     flags.DEFINE_boolean("random_mode", default=False, required=False, help="Tell the agent to run in random mode. Used mostly to ensure we collect experiences.")
+    flags.DEFINE_boolean("export_stats_only", default=False, required=False, help="Set it to true if you only want to load the agent and export its stats.")
 
     app.run(main)
