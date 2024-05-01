@@ -163,19 +163,36 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         elif self.checkpoint_path is None:
             raise RuntimeError(f"The agent's checkpoint path is None, and no checkpoint path was provided to 'save'. Please provide one of the two.")
 
-        all_episode_stats = [v for v in self._episode_stats.values()]
-        all_episode_stats = reduce(lambda v1, v2: v1 + v2, all_episode_stats)
-        episode_stats_pd = pd.DataFrame(data=all_episode_stats)
-        episode_stats_pd.to_parquet(self._checkpoint_path / "episode_stats.parquet")
-        all_agent_stats = [v for v in self._agent_stats.values()]
-        all_agent_stats = reduce(lambda v1, v2: v1 + v2, all_agent_stats)
-        agent_stats_pd = pd.DataFrame(data=all_agent_stats)
-        agent_stats_pd.to_parquet(self._checkpoint_path / "agent_stats.parquet")
+        try:
+            all_episode_stats = [v for v in self._episode_stats.values()]
+            all_episode_stats = reduce(lambda v1, v2: v1 + v2, all_episode_stats)
+            episode_stats_pd = pd.DataFrame(data=all_episode_stats)
+            episode_stats_pd.to_parquet(self._checkpoint_path / "episode_stats.parquet")
+            self.logger.info(f"Saved episode stats")
+        except Exception as error:
+            self.logger.error(f"Error saving episode stats")
+            self.logger.exception(error)
 
-        all_aggregated_stats = [v for v in self._aggregated_episode_stats.values()]
-        all_aggregated_stats = reduce(lambda v1, v2: v1 + v2, all_aggregated_stats)
-        aggregated_stats_pd = pd.DataFrame(data=all_aggregated_stats)
-        aggregated_stats_pd.to_parquet(self._checkpoint_path / "aggregated_stats.parquet")
+        try:
+            all_agent_stats = [v for v in self._agent_stats.values()]
+            all_agent_stats = reduce(lambda v1, v2: v1 + v2, all_agent_stats)
+            agent_stats_pd = pd.DataFrame(data=all_agent_stats)
+            agent_stats_pd.to_parquet(self._checkpoint_path / "agent_stats.parquet")
+            self.logger.info(f"Saved agent stats")
+        except Exception as error:
+            self.logger.error(f"Error saving agent stats")
+            self.logger.exception(error)
+
+        try:
+            all_aggregated_stats = [v for v in self._aggregated_episode_stats.values()]
+            all_aggregated_stats = reduce(lambda v1, v2: v1 + v2, all_aggregated_stats)
+            aggregated_stats_pd = pd.DataFrame(data=all_aggregated_stats)
+            aggregated_stats_pd.to_parquet(self._checkpoint_path / "aggregated_stats.parquet")
+            self.logger.info(f"Saved aggregated stats")
+        except Exception as error:
+            self.logger.error(f"Error saving aggregated stats")
+            self.logger.exception(error)
+
 
     @classmethod
     def _extract_init_arguments(cls, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
