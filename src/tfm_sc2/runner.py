@@ -21,6 +21,7 @@ from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
 
 def main(unused_argv):
     FLAGS = flags.FLAGS
+    SC2_CONFIG["visualize"] = not FLAGS.no_visualize
 
     map_name = FLAGS.map_name
     if map_name not in MAP_CONFIGS:
@@ -33,6 +34,10 @@ def main(unused_argv):
     # checkpoint_path: Path = None
     agent_file = checkpoint_path / "agent.pkl"
     load_agent = agent_file.exists()
+    if load_agent:
+        print(f"Agent will be loaded from file: {agent_file}")
+    else:
+        print(f"A new agent will be created")
     save_agent = True
     exploit = FLAGS.exploit
     # We will still save the stats when exploiting, but in a subfolder
@@ -54,14 +59,10 @@ def main(unused_argv):
         case "single.random":
             if load_agent:
                 # TODO implement load method into base agent
-                raise NotImplementedError(f"SingleRandomAgent.load not implemented yet")
+                agent = SingleRandomAgent.load(checkpoint_path=checkpoint_path, map_name=map_name, map_config=map_config)
             else:
                 agent = SingleRandomAgent(map_name=map_name, map_config=map_config, log_name = "Main Agent")
         case "single.dqn":
-            load_agent = False
-            # Check if checkpoint exists first
-            agent_file = checkpoint_path / "agent.pkl"
-
             if load_agent:
                 print(f"Loading agent from file {checkpoint_path}")
                 agent = SingleDQNAgent.load(checkpoint_path, map_name=map_name, map_config=map_config)
@@ -132,8 +133,6 @@ def main(unused_argv):
         else:
             total_emissions = tracker.stop()
             print(f"Total emissions after {finished_episodes} episodes for agent {agent._log_name} (and {len(other_agents)} other agents): {total_emissions:.2f}")
-        if save_agent:
-            agent.save_stats(save_path)
     except KeyboardInterrupt:
         pass
 
@@ -141,7 +140,7 @@ if __name__ == "__main__":
     DEFAULT_MODELS_PATH = str(Path(__file__).parent.parent.parent / "models")
 
     flags.DEFINE_enum("agent_key", "single.random", ["single.random", "single.dqn"], "Agent to use.")
-    flags.DEFINE_enum("map_name", "Simple64", ["CollectMineralsAndGas", "Simple64", "BuildMarines", "DefeatRoaches"], "Map to use.")
+    flags.DEFINE_enum("map_name", "Simple64", ["CollectMineralsAndGas", "Simple64", "BuildMarines", "DefeatRoaches", "DefeatZerglingsAndBanelings"], "Map to use.")
     flags.DEFINE_integer("num_episodes", 1, "Number of episodes to play.", lower_bound=1)
     flags.DEFINE_string("model_id", default=None, help="Determines the folder inside 'models_path' to save the model to", required=False)
     flags.DEFINE_string("models_path", help="Path where checkpoints are written to/loaded from", required=False, default=DEFAULT_MODELS_PATH)
@@ -150,5 +149,6 @@ if __name__ == "__main__":
     flags.DEFINE_boolean("save_agent", default=True, required=False, help="Whether to save the agent and/or its stats.")
     flags.DEFINE_boolean("random_mode", default=False, required=False, help="Tell the agent to run in random mode. Used mostly to ensure we collect experiences.")
     flags.DEFINE_boolean("export_stats_only", default=False, required=False, help="Set it to true if you only want to load the agent and export its stats.")
+    flags.DEFINE_boolean("no_visualize", default=False, required=False, help="Set it to true if you don't want to visualize the games.")
 
     app.run(main)

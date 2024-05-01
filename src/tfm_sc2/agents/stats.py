@@ -13,6 +13,9 @@ class EpisodeStats:
     losses: List[float] = field(default_factory=list)
     emissions: float = 0.
     score: int = 0
+    is_training: bool = False
+    is_exploit: bool = False
+    is_random_mode: bool = False
 
     @property
     def mean_loss(self) -> float:

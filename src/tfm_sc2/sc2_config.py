@@ -105,5 +105,16 @@ MAP_CONFIGS = dict(
         multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)],
         available_actions=list(ArmyAttackManagerActions)
+    ),
+    DefeatZerglingsAndBanelings=dict(
+        map_name="DefeatRoaches",
+        positions={
+            units.Terran.CommandCenter: [],
+            units.Terran.SupplyDepot: [],
+            units.Terran.Barracks: [],
+        },
+        multiple_positions=False,
+        players=[sc2_env.Agent(sc2_env.Race.terran)],
+        available_actions=list(ArmyAttackManagerActions)
     )
 )

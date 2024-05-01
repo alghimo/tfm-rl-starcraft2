@@ -27,6 +27,8 @@ DQNAgentParams = namedtuple('DQNAgentParams',
 
 State = namedtuple('State',
                             field_names=[
+                                "can_harvest_minerals", "can_recruit_worker", "can_build_supply_depot", "can_build_command_center",
+                                "can_build_barracks",  "can_recruit_marine",  "can_attack",
                                 # Actions available on the map
                                 # "map_actions",
                                 # Command centers
@@ -150,7 +152,7 @@ class DQNAgent(BaseAgent):
             main_network=torch.load(agent_attrs["main_network_path"]),
             target_network=torch.load(agent_attrs["target_network_path"]),
             buffer=agent_attrs["buffer"],
-            random_model=agent_attrs["random_mode"],
+            random_mode=agent_attrs.get("random_mode", agent_attrs.get("random_model", False)),
             hyperparams=agent_attrs["hyperparams"]
         )
 
@@ -158,16 +160,16 @@ class DQNAgent(BaseAgent):
         super()._load_agent_attrs(agent_attrs)
         self._main_network_path = agent_attrs["main_network_path"]
         self._target_network_path = agent_attrs["target_network_path"]
-        self.device = agent_attrs["device"]
+        # self.device = agent_attrs["device"]
         self.initial_epsilon = agent_attrs["initial_epsilon"]
         # self._action_to_idx = agent_attrs["action_to_idx"]
         # self._idx_to_action = agent_attrs["idx_to_action"]
         self._num_actions = agent_attrs["num_actions"]
-        self.__current_state = agent_attrs["current_state"]
-        self.__prev_state = agent_attrs["prev_state"]
-        self.__prev_reward = agent_attrs["prev_reward"]
-        self.__prev_action = agent_attrs["prev_action"]
-        self.__prev_action_args = agent_attrs["prev_action_args"]
+        # self.__current_state = agent_attrs["current_state"]
+        # self.__prev_state = agent_attrs["prev_state"]
+        # self.__prev_reward = agent_attrs["prev_reward"]
+        # self.__prev_action = agent_attrs["prev_action"]
+        # self.__prev_action_args = agent_attrs["prev_action_args"]
         self._main_network_path = agent_attrs["main_network_path"]
         self._target_network_path = agent_attrs["target_network_path"]
         self.loss = agent_attrs["loss"]
@@ -178,19 +180,19 @@ class DQNAgent(BaseAgent):
             buffer=self.buffer,
             hyperparams=self.hyperparams,
             initial_epsilon=self.initial_epsilon,
-            device=self.device,
+            # device=self.device,
             main_network_path=self._main_network_path,
             target_network_path=self._target_network_path,
             # action_to_idx=self._action_to_idx,
             # idx_to_action=self._idx_to_action,
             num_actions=self._num_actions,
-            current_state=self.__current_state,
-            prev_state=self.__prev_state,
-            prev_reward=self.__prev_reward,
-            prev_action=self.__prev_action,
-            prev_action_args=self.__prev_action_args,
+            # current_state=self.__current_state,
+            # prev_state=self.__prev_state,
+            # prev_reward=self.__prev_reward,
+            # prev_action=self.__prev_action,
+            # prev_action_args=self.__prev_action_args,
             loss=self.loss,
-            random_model=self._random_mode,
+            random_mode=self._random_mode,
             **parent_attrs
         )
 
@@ -214,6 +216,7 @@ class DQNAgent(BaseAgent):
         return super().is_training and (not self._random_mode) and (self.buffer.burn_in_capacity >= 1)
 
     def _convert_obs_to_state(self, obs: TimeStep) -> torch.Tensor:
+        actions_state = self.get_actions_state(obs)
         building_state = self._get_buildings_state(obs)
         worker_state = self._get_workers_state(obs)
         army_state = self._get_army_state(obs)
@@ -224,7 +227,7 @@ class DQNAgent(BaseAgent):
         # Enemy
 
         return torch.Tensor(State(
-            # map_actions=self._map_actions,
+            **actions_state,
 			**building_state,
 			**worker_state,
 			**army_state,
@@ -255,8 +258,11 @@ class DQNAgent(BaseAgent):
 
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
-        available_actions = self.available_actions(obs)
-        self.logger.debug(f"Available actions: {available_actions}")
+        # available_actions = self.available_actions(obs)
+        # self.logger.debug(f"Available actions: {available_actions}")
+        available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
+        # if len(available_actions) > 1 and AllActions.NO_OP in available_actions:
+        #     available_actions = [a for a in available_actions if a != AllActions.NO_OP]
         # One-hot encoded version of available actions
         valid_actions = self._actions_to_network(available_actions)
         if not any(valid_actions):
@@ -281,9 +287,9 @@ class DQNAgent(BaseAgent):
             if not self._status_flags["exploit_started"]:
                 self.logger.info(f"Starting exploit")
                 self._status_flags["exploit_started"] = True
-            available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
+            # available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
             # One-hot encoded version of available actions
-            valid_actions = self._actions_to_network(available_actions)
+            # valid_actions = self._actions_to_network(available_actions)
             # When exploiting, do not use the invalid action masking
             # raw_action = self.main_network.get_greedy_action(self.__current_state)
             raw_action = self.main_network.get_greedy_action(self.__current_state, valid_actions=valid_actions)
@@ -333,15 +339,18 @@ class DQNAgent(BaseAgent):
                         # If we finished but didn't update, perform one last update
                         self._current_episode_stats.losses = self.update_main_network(self._current_episode_stats.losses)
 
-                    self._current_episode_stats.epsilon = self.epsilon
+                    self._current_episode_stats.epsilon = self.epsilon if not self._random_mode else 1.
                     self.epsilon = max(self.epsilon * self.hyperparams.epsilon_decay, self.hyperparams.min_epsilon)
             elif self._exploit:
                 self._current_episode_stats.epsilon = 0.
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
         super().post_step(obs, action, action_args)
+
         if obs.first():
             self.__current_state = self._convert_obs_to_state(obs)
+        elif obs.last():
+            self._current_episode_stats.is_random_mode = self._random_mode
 
         self.__prev_state = self.__current_state
         self.__prev_action = self._action_to_idx[action]
@@ -633,4 +642,16 @@ class DQNAgent(BaseAgent):
             enemy_num_workers=len(enemy_workers),
             enemy_num_army_units = len(enemy_army),
             enemy_total_army_health=sum(map(lambda b: b.health, enemy_army)),
+        )
+
+    def get_actions_state(self, obs: TimeStep) -> Dict[str, int]:
+        available_actions = self.available_actions(obs)
+        return dict(
+            can_harvest_minerals=int(AllActions.HARVEST_MINERALS in available_actions),
+            can_recruit_worker=int(AllActions.RECRUIT_SCV in available_actions),
+            can_build_supply_depot=int(AllActions.BUILD_SUPPLY_DEPOT in available_actions),
+            can_build_command_center=int(AllActions.BUILD_COMMAND_CENTER in available_actions),
+            can_build_barracks=int(AllActions.BUILD_BARRACKS in available_actions),
+            can_recruit_marine=int(AllActions.RECRUIT_MARINE in available_actions),
+            can_attack=int(AllActions.ATTACK_WITH_SINGLE_UNIT in available_actions),
         )

@@ -135,6 +135,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         with open(self._agent_path, "wb") as f:
             pickle.dump(agent_attrs, f)
 
+        self.save_stats(self.checkpoint_path)
+
     @classmethod
     def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict) -> Self:
         checkpoint_path = Path(checkpoint_path)
@@ -142,8 +144,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         with open(agent_attrs_file, mode="rb") as f:
             agent_attrs = pickle.load(f)
 
-        agent_attrs = cls._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
-        agent = cls(**agent_attrs)
+        init_attrs = cls._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
+        agent = cls(**init_attrs)
         agent._load_agent_attrs(agent_attrs)
 
         if agent._current_episode_stats is None or agent._current_episode_stats.map_name != map_name:
@@ -175,7 +177,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         try:
             all_agent_stats = [v for v in self._agent_stats.values()]
-            all_agent_stats = reduce(lambda v1, v2: v1 + v2, all_agent_stats)
             agent_stats_pd = pd.DataFrame(data=all_agent_stats)
             agent_stats_pd.to_parquet(self._checkpoint_path / "agent_stats.parquet")
             self.logger.info(f"Saved agent stats")
@@ -185,14 +186,12 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         try:
             all_aggregated_stats = [v for v in self._aggregated_episode_stats.values()]
-            all_aggregated_stats = reduce(lambda v1, v2: v1 + v2, all_aggregated_stats)
             aggregated_stats_pd = pd.DataFrame(data=all_aggregated_stats)
             aggregated_stats_pd.to_parquet(self._checkpoint_path / "aggregated_stats.parquet")
             self.logger.info(f"Saved aggregated stats")
         except Exception as error:
             self.logger.error(f"Error saving aggregated stats")
             self.logger.exception(error)
-
 
     @classmethod
     def _extract_init_arguments(cls, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
@@ -205,7 +204,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
     def _load_agent_attrs(self, agent_attrs: Dict):
         self._train = agent_attrs["train"]
-        self._exploit = agent_attrs["exploit"]
+        self._exploit = agent_attrs.get("exploit", not self._train)
         self.checkpoint_path = agent_attrs["checkpoint_path"]
         self._agent_path = agent_attrs["agent_path"]
         self._stats_path = agent_attrs["stats_path"]
@@ -265,7 +264,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._attempted_command_center_positions = None
         self._attempted_barrack_positions = None
 
-        self._current_episode_stats = EpisodeStats(map_name=self._map_name)
+        self._current_episode_stats = EpisodeStats(map_name=self._map_name, is_training=self.is_training, is_exploit=self._exploit)
         self.current_agent_stats.episode_count += 1
 
     @property
@@ -298,6 +297,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._attempted_barrack_positions = []
         self._attempted_supply_depot_positions = []
         self._attempted_command_center_positions = []
+        self.update_supply_depot_positions(obs)
+        self.update_command_center_positions(obs)
+        self.update_barracks_positions(obs)
 
     @property
     @abstractmethod
@@ -535,6 +537,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             emissions = self._tracker.flush() if self._tracker is not None else 0.
             self.logger.info(f"End of episode - Got extra {emissions} since last update")
             self._current_episode_stats.emissions += emissions
+            self._current_episode_stats.is_training = self.is_training
+            self._current_episode_stats.is_exploit = self._exploit
             self._tracker_last_update = time.time()
             self.current_agent_stats.process_episode(self._current_episode_stats)
             self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
@@ -566,11 +570,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         ]
 
     def step(self, obs: TimeStep) -> AllActions:
+        if obs.first():
+            self._setup_positions(obs)
         self.pre_step(obs)
 
         super().step(obs)
-        if obs.first():
-            self._setup_positions(obs)
 
         self.update_supply_depot_positions(obs)
         self.update_command_center_positions(obs)
@@ -590,7 +594,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             self.use_command_center_position(obs, action_args["target_position"])
 
         if is_valid_action:
-            self.logger.info(f"[Step {self.steps}] Performing action {action.name} with args: {action_args}")
+            self.logger.debug(f"[Step {self.steps}] Performing action {action.name} with args: {action_args}")
         game_action = self._action_to_game[action]
 
         self.post_step(obs, action, action_args)
