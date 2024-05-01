@@ -4,7 +4,13 @@ from pathlib import Path
 from absl import app, flags
 from codecarbon import OfflineEmissionsTracker
 from pysc2.env import sc2_env
-from tfm_sc2.actions import AllActions
+from tfm_sc2.actions import (
+    AllActions,
+    ArmyAttackManagerActions,
+    ArmyRecruitManagerActions,
+    BaseManagerActions,
+    ResourceManagerActions,
+)
 from tfm_sc2.agents.dqn_agent import DQNAgentParams, State
 from tfm_sc2.agents.single.single_dqn_agent import SingleDQNAgent
 from tfm_sc2.agents.single.single_random_agent import SingleRandomAgent
@@ -42,7 +48,7 @@ def main(unused_argv):
         for other_agent_type in map_config["players"][1:]:
             if isinstance(other_agent_type, sc2_env.Agent):
                 print(f"Adding random agent as opponent #{len(other_agents) + 1}#")
-                other_agents.append(SingleRandomAgent(map_name=map_name, map_config=map_config, log_name = f"Random Agent {len(other_agents) + 1}"))
+                other_agents.append(SingleRandomAgent(map_name=map_name, map_config=map_config, log_name=f"Random Agent {len(other_agents) + 1}", log_level=logging.ERROR))
 
     match FLAGS.agent_key:
         case "single.random":

@@ -15,7 +15,7 @@ SC2_CONFIG = dict(
                     feature_dimensions=features.Dimensions(screen=256, minimap=64),
                     use_raw_units=True,
                     use_raw_actions=True),
-    step_mul=16,
+    step_mul=48,
     game_steps_per_episode=0,
     visualize=True,
     disable_fog=True
@@ -67,8 +67,8 @@ MAP_CONFIGS = dict(
         positions={
             units.Terran.CommandCenter: [(35, 36)],
             units.Terran.SupplyDepot:
-                [(x, y) for x in range(30, 35, 2) for y in range(29, 32, 2)]
-                # + [(x, y) for x in range(30, 35, 2) for y in range(41, 44, 2)]
+                [(x, 31) for x in range(30, 35, 2)]
+                + [(x, 41) for x in range(30, 35, 2)]
             ,
         },
         multiple_positions=False,
