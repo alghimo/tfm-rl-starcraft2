@@ -5,13 +5,14 @@ from typing import Optional, Union
 
 class WithLogger:
     _LOGGING_INITIALIZED = False
-    def __init__(self, logger: Optional[logging.Logger] = None, log_level: Optional[int] = logging.DEBUG, **kwargs):
+    def __init__(self, logger: Optional[logging.Logger] = None, log_name: str = None, log_level: Optional[int] = logging.DEBUG, **kwargs):
         super().__init__(**kwargs)
 
         if not WithLogger._LOGGING_INITIALIZED:
             WithLogger.init_logging()
 
-        self._logger = logger or logging.getLogger(self.__class__.__name__)
+        self._log_name = log_name or self.__class__.__name__
+        self._logger = logger or logging.getLogger(self._log_name)
         self._logger.setLevel(log_level)
 
     @property
