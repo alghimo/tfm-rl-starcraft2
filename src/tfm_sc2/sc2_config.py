@@ -1,13 +1,10 @@
-import os
 
 from pysc2.env import sc2_env
 from pysc2.lib import features, units
 from tfm_sc2.actions import (
     AllActions,
     ArmyAttackManagerActions,
-    ArmyRecruitManagerActions,
     BaseManagerActions,
-    ResourceManagerActions,
 )
 
 SC2_CONFIG = dict(
@@ -73,7 +70,7 @@ MAP_CONFIGS = dict(
         },
         multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)],
-        available_actions=list(set(list(ResourceManagerActions) + list(BaseManagerActions)))
+        available_actions=list(BaseManagerActions),
     ),
     BuildMarines=dict(
         map_name="BuildMarines",

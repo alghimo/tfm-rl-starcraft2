@@ -25,19 +25,20 @@ class AllActions(IntEnum):
     # ATTACK_WITH_FULL_ARMY     = 45
 
 class GameManagerActions(IntEnum):
-    GATHER_RESOURCES = 10
+    # GATHER_RESOURCES = 10
     EXPAND_BASE = 20
     EXPAND_ARMY = 30
     ATTACK = 40
 
-class ResourceManagerActions(IntEnum):
-    NO_OP            = AllActions.NO_OP
-    HARVEST_MINERALS = AllActions.HARVEST_MINERALS
-    # COLLECT_GAS      = AllActions.COLLECT_GAS
-    # BUILD_REFINERY   = AllActions.BUILD_REFINERY
+# class ResourceManagerActions(IntEnum):
+#     NO_OP            = AllActions.NO_OP
+#     HARVEST_MINERALS = AllActions.HARVEST_MINERALS
+#     # COLLECT_GAS      = AllActions.COLLECT_GAS
+#     # BUILD_REFINERY   = AllActions.BUILD_REFINERY
 
 class BaseManagerActions(IntEnum):
     NO_OP                = AllActions.NO_OP
+    HARVEST_MINERALS     = AllActions.HARVEST_MINERALS
     RECRUIT_SCV          = AllActions.RECRUIT_SCV
     BUILD_SUPPLY_DEPOT   = AllActions.BUILD_SUPPLY_DEPOT
     BUILD_COMMAND_CENTER = AllActions.BUILD_COMMAND_CENTER

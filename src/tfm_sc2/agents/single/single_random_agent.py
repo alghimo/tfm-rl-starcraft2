@@ -9,7 +9,7 @@ from ...actions import (
     ArmyAttackManagerActions,
     ArmyRecruitManagerActions,
     BaseManagerActions,
-    ResourceManagerActions,
+    # ResourceManagerActions,
 )
 from ...constants import Constants
 from ..base_agent import BaseAgent
@@ -26,7 +26,7 @@ class SingleRandomAgent(BaseAgent):
         # self.__original_agent_actions = list(AllActions)
         self.__original_agent_actions = list(
             set(
-                list(ResourceManagerActions) +
+                # list(ResourceManagerActions) +
                 list(BaseManagerActions) +
                 list(ArmyRecruitManagerActions) +
                 list(ArmyAttackManagerActions)

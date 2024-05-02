@@ -170,8 +170,6 @@ class DQNAgent(BaseAgent):
         # self.__prev_reward = agent_attrs["prev_reward"]
         # self.__prev_action = agent_attrs["prev_action"]
         # self.__prev_action_args = agent_attrs["prev_action_args"]
-        self._main_network_path = agent_attrs["main_network_path"]
-        self._target_network_path = agent_attrs["target_network_path"]
         self.loss = agent_attrs["loss"]
 
     def _get_agent_attrs(self):
