@@ -39,7 +39,7 @@ class ResourceManagerActions(IntEnum):
 class BaseManagerActions(IntEnum):
     NO_OP                = AllActions.NO_OP
     RECRUIT_SCV          = AllActions.RECRUIT_SCV
-    BUILD_SUPPLY         = AllActions.BUILD_SUPPLY_DEPOT
+    BUILD_SUPPLY_DEPOT   = AllActions.BUILD_SUPPLY_DEPOT
     BUILD_COMMAND_CENTER = AllActions.BUILD_COMMAND_CENTER
 
 class ArmyRecruitManagerActions(IntEnum):

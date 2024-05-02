@@ -4,6 +4,7 @@ from pathlib import Path
 from absl import app, flags
 from codecarbon import OfflineEmissionsTracker
 from pysc2.env import sc2_env
+from pysc2.lib.remote_controller import ConnectError
 from tfm_sc2.actions import (
     AllActions,
     ArmyAttackManagerActions,
@@ -91,37 +92,48 @@ def main(unused_argv):
         # We set measure_power_secs to a very high value because we want to flush emissions as we want
         tracker = OfflineEmissionsTracker(country_iso_code="ESP", experiment_id=f"global_{FLAGS.model_id}_{map_name}", measure_power_secs=3600, log_level=logging.WARNING)
         agent.set_tracker(tracker)
+        max_episode_failures = 5
+        current_episode_failures = 0
         tracker.start()
         while finished_episodes < FLAGS.num_episodes:
             already_saved = False
-            with sc2_env.SC2Env(
-                map_name=map_name,
-                players=map_config["players"],
-                **SC2_CONFIG) as env:
+            try:
+                with sc2_env.SC2Env(
+                    map_name=map_name,
+                    players=map_config["players"],
+                    **SC2_CONFIG) as env:
 
-                agent.setup(env.observation_spec(), env.action_spec())
-                for a in other_agents:
-                    a.setup(env.observation_spec(), env.action_spec())
+                    agent.setup(env.observation_spec(), env.action_spec())
+                    for a in other_agents:
+                        a.setup(env.observation_spec(), env.action_spec())
 
-                timesteps = env.reset()
-                agent.reset()
-                for a in other_agents:
-                    a.reset()
-                episode_ended = timesteps[0].last()
-                while not episode_ended:
-                    step_actions = [a.step(timestep) for a, timestep in zip([agent, *other_agents], timesteps)]
-                    # step_actions = [agent.step(timesteps[0])]
-                    timesteps = env.step(step_actions)
+                    timesteps = env.reset()
+                    agent.reset()
+                    for a in other_agents:
+                        a.reset()
                     episode_ended = timesteps[0].last()
-                    if episode_ended:
-                        # Perform one last step to process rewards etc
-                        last_step_actions = [a.step(timestep) for a, timestep in zip([agent, *other_agents], timesteps)]
+                    while not episode_ended:
+                        step_actions = [a.step(timestep) for a, timestep in zip([agent, *other_agents], timesteps)]
+                        # step_actions = [agent.step(timesteps[0])]
+                        timesteps = env.step(step_actions)
+                        episode_ended = timesteps[0].last()
+                        if episode_ended:
+                            # Perform one last step to process rewards etc
+                            last_step_actions = [a.step(timestep) for a, timestep in zip([agent, *other_agents], timesteps)]
 
-                        for idx, a in enumerate(other_agents):
-                            print(f"Total reward for random agent {idx + 1}: {a.reward}")
-
+                            for idx, a in enumerate(other_agents):
+                                print(f"Total reward for random agent {idx + 1}: {a.reward}")
+                    current_episode_failures = 0
+            except ConnectError as error:
+                print("Couldn't connect to SC2 environment, trying to restart the episode again")
+                print(error)
+                finished_episodes -= 1
+                current_episode_failures += 1
+                if current_episode_failures >= max_episode_failures:
+                    print(f"Reached max number of allowed episode failures, stopping run")
+                    break
+            finally:
                 finished_episodes += 1
-
                 if save_agent and (finished_episodes % FLAGS.save_frequency_episodes) == 0:
                     print(f"Saving agent after {finished_episodes} episodes")
                     agent.save(save_path)

@@ -93,7 +93,8 @@ MAP_CONFIGS = dict(
         },
         multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)],
-        available_actions=list(set(list(ResourceManagerActions) + list(BaseManagerActions) + list(ArmyRecruitManagerActions)))
+        available_actions=[AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.RECRUIT_SCV, AllActions.BUILD_SUPPLY_DEPOT, AllActions.BUILD_BARRACKS, AllActions.RECRUIT_MARINE]
+        # available_actions=list(set(list(ResourceManagerActions) + list(BaseManagerActions) + list(ArmyRecruitManagerActions)))
     ),
     DefeatRoaches=dict(
         map_name="DefeatRoaches",
