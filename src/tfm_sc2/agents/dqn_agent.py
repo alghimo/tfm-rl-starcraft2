@@ -285,9 +285,11 @@ class DQNAgent(BaseAgent):
             if not self._status_flags["exploit_started"]:
                 self.logger.info(f"Starting exploit")
                 self._status_flags["exploit_started"] = True
+
+            available_actions = self.available_actions(obs)
+            valid_actions = self._actions_to_network(available_actions)
             # available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
             # One-hot encoded version of available actions
-            # valid_actions = self._actions_to_network(available_actions)
             # When exploiting, do not use the invalid action masking
             # raw_action = self.main_network.get_greedy_action(self.__current_state)
             raw_action = self.main_network.get_greedy_action(self.__current_state, valid_actions=valid_actions)

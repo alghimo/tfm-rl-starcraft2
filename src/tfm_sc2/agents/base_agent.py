@@ -582,6 +582,15 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         action, action_args, is_valid_action = self.select_action(obs)
 
+        # if not is_valid_action and (action == AllActions.ATTACK_WITH_SINGLE_UNIT) and self.can_take(obs, AllActions.RECRUIT_MARINE):
+        #     self.logger.warning(f"Converting action {action.name} to RECRUIT_MARINE")
+        #     action = AllActions.RECRUIT_MARINE
+        #     action_args, is_valid_action = self._get_action_args(obs, action)
+        # if not is_valid_action and (action == AllActions.RECRUIT_MARINE) and self.can_take(obs, AllActions.BUILD_BARRACKS):
+        #     self.logger.warning(f"Converting action {action.name} to BUILD_BARRACKS")
+        #     action = AllActions.BUILD_BARRACKS
+        #     action_args, is_valid_action = self._get_action_args(obs, action)
+
         if not is_valid_action:
             self.logger.info(f"Action {action.name} is not valid anymore, returning NO_OP")
             action = AllActions.NO_OP
