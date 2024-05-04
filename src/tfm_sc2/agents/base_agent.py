@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import torch
 from codecarbon.emissions_tracker import BaseEmissionsTracker
 from pysc2.agents import base_agent
 from pysc2.env.environment import TimeStep
@@ -19,7 +20,8 @@ from typing_extensions import Self
 
 from ..actions import AllActions
 from ..constants import Constants, SC2Costs
-from ..types import AgentStage, Gas, Minerals, Position, RewardMethod
+from ..networks.experience_replay_buffer import ExperienceReplayBuffer
+from ..types import AgentStage, Gas, Minerals, Position, RewardMethod, State
 from ..with_logger import WithLogger
 
 # from ..with_tracker import WithTracker
@@ -30,6 +32,7 @@ from .stats import AgentStats, AggregatedEpisodeStats, EpisodeStats
 
 class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     _AGENT_FILE: str = "agent.pkl"
+    _BUFFER_FILE: str = "buffer.pkl"
     _STATS_FILE: str =  "stats.parquet"
 
     _action_to_game = {
@@ -50,7 +53,10 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         # AllActions.ATTACK_WITH_FULL_ARMY: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag)
     }
 
-    def __init__(self, map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10, reward_method: RewardMethod = RewardMethod.REWARD, **kwargs):
+    def __init__(self,
+                 map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None,
+                 tracker_update_freq_seconds: int = 10, reward_method: RewardMethod = RewardMethod.REWARD,
+                 buffer: ExperienceReplayBuffer = None, **kwargs):
         super().__init__(**kwargs)
         self._map_name = map_name
         self._map_config = map_config
@@ -76,17 +82,26 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._current_reward = 0.
         self._current_adjusted_reward = 0.
         self._reward_method = reward_method
+        self._buffer = buffer
+        self._current_state = None
+        self._prev_state = None
+
+        self._action_to_idx = None
+        self._idx_to_action = None
+        self._num_actions = None
 
         if checkpoint_path is not None:
             self._checkpoint_path = Path(checkpoint_path)
             self._checkpoint_path.mkdir(exist_ok=True, parents=True)
             self._agent_path = self._checkpoint_path / self._AGENT_FILE
+            self._buffer_path = self._checkpoint_path / self._BUFFER_FILE
             self._stats_path = self._checkpoint_path / self._STATS_FILE
         else:
             self._checkpoint_path = None
             self._main_network_path = None
             self._target_network_path = None
             self._agent_path = None
+            self._buffer_path = None
             self._stats_path = None
 
         self._status_flags = dict(
@@ -131,9 +146,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def _update_checkpoint_paths(self):
         if self.checkpoint_path is None:
             self._agent_path = None
+            self._buffer_path = None
             self._stats_path = None
         else:
             self._agent_path = self.checkpoint_path / self._AGENT_FILE
+            self._buffer_path = self.checkpoint_path / self._BUFFER_FILE
             self._stats_path = self.checkpoint_path / self._STATS_FILE
 
     def save(self, checkpoint_path: Union[str|Path] = None):
@@ -148,6 +165,10 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             pickle.dump(agent_attrs, f)
 
         self.save_stats(self.checkpoint_path)
+
+        if self._buffer is not None:
+            with open(self._buffer_path, "wb") as f:
+                pickle.dump(self._buffer, f)
 
     @classmethod
     def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict) -> Self:
@@ -211,7 +232,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             map_name=map_name,
             map_config=map_config,
             train=agent_attrs["train"],
-            log_name=agent_attrs["log_name"]
+            log_name=agent_attrs["log_name"],
+            buffer=agent_attrs["buffer"],
         )
 
     def _load_agent_attrs(self, agent_attrs: Dict):
@@ -240,6 +262,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             train=self._train,
             exploit=self._exploit,
             checkpoint_path=self.checkpoint_path,
+            buffer=self._buffer,
             agent_path=self._agent_path,
             stats_path=self._stats_path,
             agent_stats=self._agent_stats,
@@ -291,6 +314,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._current_score = 0.
         self._current_reward = 0.
         self._current_adjusted_reward = 0.
+        self._prev_state = None
+        self._current_state = None
 
         current_stage = self._current_agent_stage().name
         self._current_episode_stats = EpisodeStats(map_name=self._map_name, is_burnin=False, is_training=self.is_training, is_exploit=self._exploit, episode=self.current_agent_stats.episode_count, initial_stage=current_stage)
@@ -574,7 +599,49 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         return reward, adjusted_reward, score_delta
 
+    def _convert_obs_to_state(self, obs: TimeStep) -> torch.Tensor:
+        actions_state = self._get_actions_state(obs)
+        building_state = self._get_buildings_state(obs)
+        worker_state = self._get_workers_state(obs)
+        army_state = self._get_army_state(obs)
+        resources_state = self._get_resources_state(obs)
+        scores_state = self._get_scores_state(obs)
+        neutral_units_state = self._get_neutral_units_state(obs)
+        enemy_state = self._get_enemy_state(obs)
+        # Enemy
+
+        return torch.Tensor(State(
+            **actions_state,
+			**building_state,
+			**worker_state,
+			**army_state,
+			**resources_state,
+            **scores_state,
+            **neutral_units_state,
+            **enemy_state
+        )).to(device=self.device)
+
+    def _actions_to_network(self, actions: List[AllActions], as_tensor: bool = True) -> List[np.int8]:
+        """Converts a list of AllAction elements to a one-hot encoded version that the network can use.
+
+        Args:
+            actions (List[AllActions]): List of actions
+
+        Returns:
+            List[bool]: One-hot encoded version of the actions provided.
+        """
+        ohe_actions = np.zeros(self._num_actions, dtype=np.int8)
+
+        for action in actions:
+            action_idx = self._action_to_idx[action]
+            ohe_actions[action_idx] = 1
+
+        if not as_tensor:
+            return ohe_actions
+        return torch.Tensor(ohe_actions).to(device=self.device)
+
     def pre_step(self, obs: TimeStep):
+        self._current_state = self._convert_obs_to_state(obs)
         reward, adjusted_reward, score = self.get_reward_and_score(obs)
         self._current_episode_stats.reward += reward
         self._current_episode_stats.adjusted_reward += adjusted_reward
@@ -582,8 +649,20 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._current_episode_stats.steps += 1
         self.current_agent_stats.step_count += 1
 
+        if obs.first():
+            self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
+            self._action_to_idx = { action: idx for idx, action in enumerate(self.agent_actions) }
+            self._num_actions = len(self.agent_actions)
+        else:
+            done = obs.last()
+            self._buffer.append(self._prev_state, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self._current_state)
+
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any], original_action: AllActions, original_action_args: Dict[str, Any], is_valid_action: bool):
         self._prev_score = obs.observation.score_cumulative.score
+        self._prev_state = self._current_state
+        self._prev_action = self._action_to_idx[original_action]
+        self._prev_action_args = original_action_args
+
         if obs.last():
             emissions = self._tracker.flush() if self._tracker is not None else 0.
             self.logger.debug(f"End of episode - Got extra {emissions} since last update")
@@ -1244,3 +1323,224 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 target_resource = command_center_closest_resource[closest_command_center.tag]
 
         return closest_worker, target_resource
+
+
+    def _get_buildings_state(self, obs):
+        def _num_complete(buildings):
+            return len(list(filter(self.is_complete, buildings)))
+        # info about command centers
+        command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+        num_command_centers = len(command_centers)
+        num_completed_command_centers = _num_complete(command_centers)
+        command_centers_state = dict(
+            num_command_centers=num_command_centers,
+            num_completed_command_centers=num_completed_command_centers
+        )
+
+        for idx in range(4):
+            if idx >= num_command_centers:
+                order_length = -1
+                assigned_harvesters = -1
+            else:
+                cc = command_centers[idx]
+                order_length = cc.order_length
+                assigned_harvesters = cc.assigned_harvesters
+
+            command_centers_state[f"command_center_{idx}_order_length"] = order_length
+            command_centers_state[f"command_center_{idx}_num_workers"] = assigned_harvesters
+
+        # Buildings
+        supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
+        num_supply_depots = len(supply_depots)
+        refineries = self.get_self_units(obs, unit_types=units.Terran.Refinery)
+        num_refineries = len(refineries)
+        barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+        num_barracks = len(barracks)
+        other_building_types = [
+            bt for bt in Constants.BUILDING_UNIT_TYPES
+            if bt not in [units.Terran.CommandCenter, units.Terran.SupplyDepot, units.Terran.Refinery, units.Terran.Barracks]
+        ]
+        other_buildings = self.get_self_units(obs, unit_types=other_building_types)
+
+        other_buildings = [b for b in other_buildings if b not in []]
+        num_other_buildings = len(other_buildings)
+        buildings_state = dict(
+			num_refineries=num_refineries,
+			num_completed_refineries=_num_complete(refineries),
+			# Supply Depots
+			num_supply_depots=num_supply_depots,
+			num_completed_supply_depots=_num_complete(supply_depots),
+			# Barracks
+			num_barracks=num_barracks,
+			num_completed_barracks=_num_complete(barracks),
+            num_other_buildings=num_other_buildings
+        )
+
+        return {
+            **command_centers_state,
+            **buildings_state
+        }
+
+    def _get_workers_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        workers = self.get_workers(obs)
+        num_harvesters = len([w for w in workers if w.order_id_0 in Constants.HARVEST_ACTIONS])
+        refineries = self.get_self_units(obs, unit_types=units.Terran.Refinery)
+        num_gas_harvesters = sum(map(lambda r: r.assigned_harvesters, refineries))
+        num_mineral_harvesters = num_harvesters - num_gas_harvesters
+        num_workers = len(workers)
+        num_idle_workers = len([w for w in workers if self.is_idle(w)])
+        pct_idle_workers = 0 if num_workers == 0 else num_idle_workers / num_workers
+        pct_mineral_harvesters = 0 if num_workers == 0 else num_mineral_harvesters / num_workers
+        pct_gas_harvesters = 0 if num_workers == 0 else num_gas_harvesters / num_workers
+
+        # TODO more stats on N workers (e.g. distance to command centers, distance to minerals, to geysers...)
+        return dict(
+            num_workers=num_workers,
+			num_idle_workers=len([w for w in workers if self.is_idle(w)]),
+            pct_idle_workers=pct_idle_workers,
+            num_mineral_harvesters=num_mineral_harvesters,
+            pct_mineral_harvesters=pct_mineral_harvesters,
+            num_gas_harvesters=num_gas_harvesters,
+            pct_gas_harvesters=pct_gas_harvesters
+        )
+
+    def _get_army_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        marines = self.get_self_units(obs, unit_types=units.Terran.Marine)
+        barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+        num_marines_in_queue = sum(map(lambda b: b.order_length, barracks))
+        other_army_units_types = [ut for ut in Constants.ARMY_UNIT_TYPES if ut not in [units.Terran.Marine]]
+        other_army_units = self.get_self_units(obs, unit_types=other_army_units_types)
+        return dict(
+            num_marines=len(marines),
+            num_marines_in_queue=num_marines_in_queue,
+            num_other_army_units=len(other_army_units)
+        )
+
+    def _get_resources_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        return dict(
+            free_supply=self.get_free_supply(obs),
+            minerals=obs.observation.player.minerals,
+            gas=obs.observation.player.vespene,
+        )
+
+    def _get_scores_state(self, obs: TimeStep)     -> Dict[str, int|float]:
+        return {
+            "score_cumulative_score": obs.observation.score_cumulative.score,
+            "score_cumulative_idle_production_time": obs.observation.score_cumulative.idle_production_time,
+            "score_cumulative_idle_worker_time": obs.observation.score_cumulative.idle_worker_time,
+            "score_cumulative_total_value_units": obs.observation.score_cumulative.total_value_units,
+            "score_cumulative_total_value_structures": obs.observation.score_cumulative.total_value_structures,
+            "score_cumulative_killed_value_units": obs.observation.score_cumulative.killed_value_units,
+            "score_cumulative_killed_value_structures": obs.observation.score_cumulative.killed_value_structures,
+            "score_cumulative_collected_minerals": obs.observation.score_cumulative.collected_minerals,
+            "score_cumulative_collected_vespene": obs.observation.score_cumulative.collected_vespene,
+            "score_cumulative_collection_rate_minerals": obs.observation.score_cumulative.collection_rate_minerals,
+            "score_cumulative_collection_rate_vespene": obs.observation.score_cumulative.collection_rate_vespene,
+            "score_cumulative_spent_minerals": obs.observation.score_cumulative.spent_minerals,
+            "score_cumulative_spent_vespene": obs.observation.score_cumulative.spent_vespene,
+            # Supply (food) scores
+            "score_food_used_none": obs.observation.score_by_category.food_used.none,
+            "score_food_used_army": obs.observation.score_by_category.food_used.army,
+            "score_food_used_economy": obs.observation.score_by_category.food_used.economy,
+            "score_food_used_technology": obs.observation.score_by_category.food_used.technology,
+            "score_food_used_upgrade": obs.observation.score_by_category.food_used.upgrade,
+            # Killed minerals and vespene
+            "score_killed_minerals_none": obs.observation.score_by_category.killed_minerals.none,
+            "score_killed_minerals_army": obs.observation.score_by_category.killed_minerals.army,
+            "score_killed_minerals_economy": obs.observation.score_by_category.killed_minerals.economy,
+            "score_killed_minerals_technology": obs.observation.score_by_category.killed_minerals.technology,
+            "score_killed_minerals_upgrade": obs.observation.score_by_category.killed_minerals.upgrade,
+            "score_killed_vespene_none": obs.observation.score_by_category.killed_vespene.none,
+            "score_killed_vespene_army": obs.observation.score_by_category.killed_vespene.army,
+            "score_killed_vespene_economy": obs.observation.score_by_category.killed_vespene.economy,
+            "score_killed_vespene_technology": obs.observation.score_by_category.killed_vespene.technology,
+            "score_killed_vespene_upgrade": obs.observation.score_by_category.killed_vespene.upgrade,
+            # Lost minerals and vespene
+            "score_lost_minerals_none": obs.observation.score_by_category.lost_minerals.none,
+            "score_lost_minerals_army": obs.observation.score_by_category.lost_minerals.army,
+            "score_lost_minerals_economy": obs.observation.score_by_category.lost_minerals.economy,
+            "score_lost_minerals_technology": obs.observation.score_by_category.lost_minerals.technology,
+            "score_lost_minerals_upgrade": obs.observation.score_by_category.lost_minerals.upgrade,
+            "score_lost_vespene_none": obs.observation.score_by_category.lost_vespene.none,
+            "score_lost_vespene_army": obs.observation.score_by_category.lost_vespene.army,
+            "score_lost_vespene_economy": obs.observation.score_by_category.lost_vespene.economy,
+            "score_lost_vespene_technology": obs.observation.score_by_category.lost_vespene.technology,
+            "score_lost_vespene_upgrade": obs.observation.score_by_category.lost_vespene.upgrade,
+            # Friendly fire minerals and vespene
+            "score_friendly_fire_minerals_none": obs.observation.score_by_category.friendly_fire_minerals.none,
+            "score_friendly_fire_minerals_army": obs.observation.score_by_category.friendly_fire_minerals.army,
+            "score_friendly_fire_minerals_economy": obs.observation.score_by_category.friendly_fire_minerals.economy,
+            "score_friendly_fire_minerals_technology": obs.observation.score_by_category.friendly_fire_minerals.technology,
+            "score_friendly_fire_minerals_upgrade": obs.observation.score_by_category.friendly_fire_minerals.upgrade,
+            "score_friendly_fire_vespene_none": obs.observation.score_by_category.friendly_fire_vespene.none,
+            "score_friendly_fire_vespene_army": obs.observation.score_by_category.friendly_fire_vespene.army,
+            "score_friendly_fire_vespene_economy": obs.observation.score_by_category.friendly_fire_vespene.economy,
+            "score_friendly_fire_vespene_technology": obs.observation.score_by_category.friendly_fire_vespene.technology,
+            "score_friendly_fire_vespene_upgrade": obs.observation.score_by_category.friendly_fire_vespene.upgrade,
+            # Used minerals and vespene
+            "score_used_minerals_none": obs.observation.score_by_category.used_minerals.none,
+            "score_used_minerals_army": obs.observation.score_by_category.used_minerals.army,
+            "score_used_minerals_economy": obs.observation.score_by_category.used_minerals.economy,
+            "score_used_minerals_technology": obs.observation.score_by_category.used_minerals.technology,
+            "score_used_minerals_upgrade": obs.observation.score_by_category.used_minerals.upgrade,
+            "score_used_vespene_none": obs.observation.score_by_category.used_vespene.none,
+            "score_used_vespene_army": obs.observation.score_by_category.used_vespene.army,
+            "score_used_vespene_economy": obs.observation.score_by_category.used_vespene.economy,
+            "score_used_vespene_technology": obs.observation.score_by_category.used_vespene.technology,
+            "score_used_vespene_upgrade": obs.observation.score_by_category.used_vespene.upgrade,
+            # Total used minerals and vespene
+            "score_total_used_minerals_none": obs.observation.score_by_category.total_used_minerals.none,
+            "score_total_used_minerals_army": obs.observation.score_by_category.total_used_minerals.army,
+            "score_total_used_minerals_economy": obs.observation.score_by_category.total_used_minerals.economy,
+            "score_total_used_minerals_technology": obs.observation.score_by_category.total_used_minerals.technology,
+            "score_total_used_minerals_upgrade": obs.observation.score_by_category.total_used_minerals.upgrade,
+            "score_total_used_vespene_none": obs.observation.score_by_category.total_used_vespene.none,
+            "score_total_used_vespene_army": obs.observation.score_by_category.total_used_vespene.army,
+            "score_total_used_vespene_economy": obs.observation.score_by_category.total_used_vespene.economy,
+            "score_total_used_vespene_technology": obs.observation.score_by_category.total_used_vespene.technology,
+            "score_total_used_vespene_upgrade": obs.observation.score_by_category.total_used_vespene.upgrade,
+
+            # Score by vital
+            "score_by_vital_total_damage_dealt_life": obs.observation.score_by_vital.total_damage_dealt.life,
+            "score_by_vital_total_damage_dealt_shields": obs.observation.score_by_vital.total_damage_dealt.shields,
+            "score_by_vital_total_damage_dealt_energy": obs.observation.score_by_vital.total_damage_dealt.energy,
+            "score_by_vital_total_damage_taken_life": obs.observation.score_by_vital.total_damage_taken.life,
+            "score_by_vital_total_damage_taken_shields": obs.observation.score_by_vital.total_damage_taken.shields,
+            "score_by_vital_total_damage_taken_energy": obs.observation.score_by_vital.total_damage_taken.energy,
+            "score_by_vital_total_healed_life": obs.observation.score_by_vital.total_healed.life,
+            "score_by_vital_total_healed_shields": obs.observation.score_by_vital.total_healed.shields,
+            "score_by_vital_total_healed_energy": obs.observation.score_by_vital.total_healed.energy,
+        }
+
+    def _get_neutral_units_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
+        geysers = [unit.tag for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
+        return dict(
+            num_minerals=len(minerals),
+            num_geysers=len(geysers),
+        )
+
+    def _get_enemy_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        enemy_buildings = self.get_enemy_units(obs, unit_types=Constants.BUILDING_UNIT_TYPES)
+        enemy_workers = self.get_enemy_units(obs, unit_types=Constants.WORKER_UNIT_TYPES)
+        enemy_army = self.get_enemy_units(obs, unit_types=Constants.ARMY_UNIT_TYPES)
+
+        return dict(
+            enemy_num_buildings=len(enemy_buildings),
+            enemy_total_building_health=sum(map(lambda b: b.health, enemy_buildings)),
+            enemy_num_workers=len(enemy_workers),
+            enemy_num_army_units = len(enemy_army),
+            enemy_total_army_health=sum(map(lambda b: b.health, enemy_army)),
+        )
+
+    def _get_actions_state(self, obs: TimeStep) -> Dict[str, int]:
+        available_actions = self.available_actions(obs)
+        return dict(
+            can_harvest_minerals=int(AllActions.HARVEST_MINERALS in available_actions),
+            can_recruit_worker=int(AllActions.RECRUIT_SCV in available_actions),
+            can_build_supply_depot=int(AllActions.BUILD_SUPPLY_DEPOT in available_actions),
+            can_build_command_center=int(AllActions.BUILD_COMMAND_CENTER in available_actions),
+            can_build_barracks=int(AllActions.BUILD_BARRACKS in available_actions),
+            can_recruit_marine=int(AllActions.RECRUIT_MARINE in available_actions),
+            can_attack=int(AllActions.ATTACK_WITH_SINGLE_UNIT in available_actions),
+        )

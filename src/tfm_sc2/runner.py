@@ -103,17 +103,18 @@ def load_random_agent(cls, map_name, map_config, checkpoint_path: Path):
 
     return agent
 
-def create_random_agent(cls, map_name, map_config, checkpoint_path: Path, log_name: str, reward_method: RewardMethod, **extra_agent_args):
-    agent = cls(map_name=map_name, map_config=map_config, log_name=log_name, checkpoint_path=checkpoint_path, reward_method=reward_method, **extra_agent_args)
+def create_random_agent(cls, map_name, map_config, checkpoint_path: Path, memory_size: int, burn_in: int, log_name: str, reward_method: RewardMethod, **extra_agent_args):
+    buffer = ExperienceReplayBuffer(memory_size=memory_size, burn_in=burn_in)
+    agent = cls(map_name=map_name, map_config=map_config, log_name=log_name, buffer=buffer, checkpoint_path=checkpoint_path, reward_method=reward_method, **extra_agent_args)
 
     return agent
 
 
-def load_or_create_random_agent(cls, map_name, map_config, load_agent: bool, checkpoint_path: Path, log_name: str, reward_method: RewardMethod, **extra_agent_args):
+def load_or_create_random_agent(cls, map_name, map_config, load_agent: bool, memory_size: int, burn_in: int, checkpoint_path: Path, log_name: str, reward_method: RewardMethod, **extra_agent_args):
     if load_agent:
         agent = load_random_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path)
     else:
-        agent = create_random_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path, log_name=log_name, reward_method=reward_method, **extra_agent_args)
+        agent = create_random_agent(cls=cls, map_name=map_name, map_config=map_config, memory_size=memory_size, burn_in=burn_in, checkpoint_path=checkpoint_path, log_name=log_name, reward_method=reward_method, **extra_agent_args)
 
     return agent
 
@@ -171,28 +172,28 @@ def main(unused_argv):
 
     match FLAGS.agent_key:
         case "single.random":
-            agent = load_or_create_random_agent(cls=SingleRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, reward_method=reward_method, log_name="Main Agent - Random")
+            agent = load_or_create_random_agent(cls=SingleRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=checkpoint_path, reward_method=reward_method, log_name="Main Agent - Random")
         case "single.dqn":
             agent = load_or_create_dqn_agent(SingleDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, exploit=exploit, memory_size=100000, burn_in=10000, load_networks_only=load_networks_only, reward_method=reward_method, log_name="Main Agent - SingleDQN")
         case "multi.random.base_manager":
-            agent = load_or_create_random_agent(BaseManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, reward_method=reward_method)
+            agent = load_or_create_random_agent(BaseManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=checkpoint_path, reward_method=reward_method)
         case "multi.random.army_recruit_manager":
-            agent = load_or_create_random_agent(ArmyRecruitManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, reward_method=reward_method)
+            agent = load_or_create_random_agent(ArmyRecruitManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=checkpoint_path, reward_method=reward_method)
         case "multi.random.army_attack_manager":
-            agent = load_or_create_random_agent(ArmyAttackManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, reward_method=reward_method)
+            agent = load_or_create_random_agent(ArmyAttackManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=checkpoint_path, reward_method=reward_method)
         case "multi.random.game_manager":
             bm_path = checkpoint_path / "base_manager"
-            base_manager = load_or_create_random_agent(BaseManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=bm_path, reward_method=reward_method)
+            base_manager = load_or_create_random_agent(BaseManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=bm_path, reward_method=reward_method)
             arm_path = checkpoint_path / "army_recruit_manager"
-            army_recruit_manager = load_or_create_random_agent(ArmyRecruitManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=arm_path, reward_method=reward_method)
+            army_recruit_manager = load_or_create_random_agent(ArmyRecruitManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=arm_path, reward_method=reward_method)
             aam_path = checkpoint_path / "army_attack_manager"
-            army_attack_manager = load_or_create_random_agent(ArmyAttackManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=aam_path, reward_method=reward_method)
+            army_attack_manager = load_or_create_random_agent(ArmyAttackManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=aam_path, reward_method=reward_method)
             extra_agent_args = dict(
                 base_manager=base_manager,
                 army_recruit_manager=army_recruit_manager,
                 army_attack_manager=army_attack_manager
             )
-            agent = load_or_create_random_agent(GameManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, reward_method=reward_method, **extra_agent_args)
+            agent = load_or_create_random_agent(GameManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, memory_size=100000, burn_in=10000, checkpoint_path=checkpoint_path, reward_method=reward_method, **extra_agent_args)
         case "multi.dqn.base_manager":
             agent = load_or_create_dqn_agent(BaseManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, exploit=exploit, memory_size=10000, burn_in=1000, load_networks_only=load_networks_only, reward_method=reward_method, log_name="Main Agent - Base Manager")
         case "multi.dqn.army_recruit_manager":
@@ -265,7 +266,7 @@ def main(unused_argv):
                         break
                 finally:
                     burnin_episodes += 1
-                    logger.info(f"Burnin progress: {100 * agent.buffer.burn_in_capacity:.2f}%")
+                    logger.info(f"Burnin progress: {100 * agent._buffer.burn_in_capacity:.2f}%")
             logger.info(f"Finished burnin after {burnin_episodes} episodes")
 
         while finished_episodes < FLAGS.num_episodes:
