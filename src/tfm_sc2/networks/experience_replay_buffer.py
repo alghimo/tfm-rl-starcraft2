@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 import numpy as np
 
 Sample = List[Any]
-Buffer = namedtuple('Buffer', field_names=['state', 'action', 'action_args', 'reward', 'done', 'next_state'])
+Buffer = namedtuple('Buffer', field_names=['state', 'action', 'action_args', 'reward', 'adjusted_reward', 'score', 'done', 'next_state'])
 
 
 class ExperienceReplayBuffer:
@@ -37,7 +37,7 @@ class ExperienceReplayBuffer:
 
         return batch
 
-    def append(self, state: Any, action: Any, action_args: Dict[str, Any], reward: float, done: bool, next_state: Any):
+    def append(self, state: Any, action: Any, action_args: Dict[str, Any], reward: float, adjusted_reward: float, score: float, done: bool, next_state: Any):
         """Add a new sample to the replay memory.
 
         Args:
@@ -49,7 +49,7 @@ class ExperienceReplayBuffer:
             next_state (Any): New state of the environment after taking the action
         """
         self._replay_memory.append(
-            self._buffer(state, action, action_args, reward, done, next_state))
+            self._buffer(state, action, action_args, reward, adjusted_reward, score, done, next_state))
 
     @property
     def burn_in_capacity(self) -> float:

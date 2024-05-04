@@ -17,7 +17,7 @@ from ..actions import AllActions
 from ..constants import Constants, SC2Costs
 from ..networks.dqn_network import DQNNetwork
 from ..networks.experience_replay_buffer import ExperienceReplayBuffer
-from ..types import Gas, Minerals
+from ..types import Gas, Minerals, RewardMethod, AgentStage
 from .base_agent import BaseAgent
 from .stats import AgentStats, AggregatedEpisodeStats, EpisodeStats
 
@@ -109,6 +109,7 @@ class DQNAgent(BaseAgent):
         self.epsilon = hyperparams.epsilon
         self.loss = self.hyperparams.loss or torch.nn.HuberLoss()
         self._random_mode = random_mode
+        self._is_burnin = self.buffer.burn_in_capacity < 1
 
         # Placeholders
         self._action_to_idx = None
@@ -118,8 +119,6 @@ class DQNAgent(BaseAgent):
         self.__current_state = None
         self.__prev_state = None
         self.__prev_reward = None
-        self.__prev_action = None
-        self.__prev_action_args = None
 
         # Add some extra flags to the default ones (train / exploit)
         self._status_flags.update(dict(
@@ -134,6 +133,10 @@ class DQNAgent(BaseAgent):
         else:
             self._main_network_path = None
             self._target_network_path = None
+
+    @property
+    def _collect_stats(self) -> bool:
+        return not (self._is_burnin or self._random_mode)
 
     def _update_checkpoint_paths(self):
         super()._update_checkpoint_paths()
@@ -199,19 +202,33 @@ class DQNAgent(BaseAgent):
         torch.save(self.main_network, self._main_network_path)
         torch.save(self.target_network, self._target_network_path)
 
+    def _current_agent_stage(self):
+        if self._is_burnin:
+            return AgentStage.BURN_IN
+        if self._exploit:
+            return AgentStage.EXPLOIT
+        if self.is_training:
+            return AgentStage.TRAINING
+        return AgentStage.UNKNOWN
+
+    @property
+    def memory_replay_ready(self) -> bool:
+        return self.buffer.burn_in_capacity >= 1
+
     def reset(self, **kwargs):
         """Initialize the agent."""
         super().reset(**kwargs)
         # Last observation
         self.__prev_state = None
         self.__prev_reward = None
-        self.__prev_action = None
-        self.__prev_action_args = None
         self.__current_state = None
+
+        self._is_burnin = self.buffer.burn_in_capacity < 1
+        self._current_episode_stats.is_burnin = self._is_burnin
 
     @property
     def is_training(self):
-        return super().is_training and (not self._random_mode) and (self.buffer.burn_in_capacity >= 1)
+        return super().is_training and (not self._random_mode) and (not self._is_burnin)
 
     def _convert_obs_to_state(self, obs: TimeStep) -> torch.Tensor:
         actions_state = self.get_actions_state(obs)
@@ -265,12 +282,12 @@ class DQNAgent(BaseAgent):
         valid_actions = self._actions_to_network(available_actions)
         if not any(valid_actions):
             valid_actions = None
-        if (self._random_mode) or (self._train and (self.buffer.burn_in_capacity < 1)):
-            if not self._status_flags["burnin_started"]:
-                self.logger.info(f"Starting burn-in")
-                self._status_flags["burnin_started"] = True
+        if (self._random_mode) or (self._train and self._is_burnin):
             if self._random_mode:
                 self.logger.debug(f"Random mode - collecting experience from random actions")
+            elif not self._status_flags["burnin_started"]:
+                self.logger.info(f"Starting burn-in")
+                self._status_flags["burnin_started"] = True
             else:
                 self.logger.debug(f"Burn in capacity: {100 * self.buffer.burn_in_capacity:.2f}%")
             raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
@@ -302,12 +319,12 @@ class DQNAgent(BaseAgent):
         return action, action_args, is_valid_action
 
     def pre_step(self, obs: TimeStep):
+        super().pre_step(obs)
         self.__current_state = self._convert_obs_to_state(obs)
-        reward = obs.reward
 
-        self._current_episode_stats.reward += reward
-        self._current_episode_stats.steps += 1
-        self.current_agent_stats.step_count += 1
+        # self._current_episode_stats.reward += reward
+        # self._current_episode_stats.steps += 1
+        # self.current_agent_stats.step_count += 1
 
         if obs.first():
             self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
@@ -317,35 +334,44 @@ class DQNAgent(BaseAgent):
         else:
             # do updates
             done = obs.last()
-            self.buffer.append(self.__prev_state, self.__prev_action, self.__prev_action_args, reward, done, self.__current_state)
+            self.buffer.append(self.__prev_state, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self.__current_state)
 
             if self.is_training:
-                updated = False
-                if (self._current_episode_stats.steps % self.hyperparams.main_network_update_frequency) == 0:
-                    if not self._status_flags["main_net_updated"]:
-                        self.logger.info(f"First main network update")
-                        self._status_flags["main_net_updated"] = True
-                    self._current_episode_stats.losses = self.update_main_network(self._current_episode_stats.losses)
-                    updated = True
-                if (self._current_episode_stats.steps % self.hyperparams.target_network_sync_frequency) == 0:
-                    if not self._status_flags["target_net_updated"]:
-                        self.logger.info(f"First target network update")
-                        self._status_flags["target_net_updated"] = True
-                    self.synchronize_target_network()
+                main_net_updated = False
+                target_net_updated = False
+                if self.hyperparams.main_network_update_frequency > -1:
+                    if (self._current_episode_stats.steps % self.hyperparams.main_network_update_frequency) == 0:
+                        if not self._status_flags["main_net_updated"]:
+                            self.logger.info(f"First main network update")
+                            self._status_flags["main_net_updated"] = True
+                        self._current_episode_stats.losses = self.update_main_network(self._current_episode_stats.losses)
+                        main_net_updated = True
+                if self.hyperparams.target_network_sync_frequency > -1:
+                    if (self._current_episode_stats.steps % self.hyperparams.target_network_sync_frequency) == 0:
+                        if not self._status_flags["target_net_updated"]:
+                            self.logger.info(f"First target network update")
+                            self._status_flags["target_net_updated"] = True
+                        self.synchronize_target_network()
+                        target_net_updated = True
                 # HERE
 
                 if done:
-                    if not updated:
+                    if not main_net_updated:
                         # If we finished but didn't update, perform one last update
                         self._current_episode_stats.losses = self.update_main_network(self._current_episode_stats.losses)
+                    if not target_net_updated:
+                        self.synchronize_target_network()
 
                     self._current_episode_stats.epsilon = self.epsilon if not self._random_mode else 1.
+                    self._current_episode_stats.loss = np.mean(self._current_episode_stats.losses)
                     self.epsilon = max(self.epsilon * self.hyperparams.epsilon_decay, self.hyperparams.min_epsilon)
-            elif self._exploit:
+            elif done and self._is_burnin:
+                self._current_episode_stats.epsilon = 1.
+            elif done and self._exploit:
                 self._current_episode_stats.epsilon = 0.
 
-    def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
-        super().post_step(obs, action, action_args)
+    def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any], original_action: AllActions, original_action_args: Dict[str, Any], is_valid_action: bool):
+        super().post_step(obs, action, action_args, original_action, original_action_args, is_valid_action)
 
         if obs.first():
             self.__current_state = self._convert_obs_to_state(obs)
@@ -353,8 +379,8 @@ class DQNAgent(BaseAgent):
             self._current_episode_stats.is_random_mode = self._random_mode
 
         self.__prev_state = self.__current_state
-        self.__prev_action = self._action_to_idx[action]
-        self.__prev_action_args = action_args
+        self._prev_action = self._action_to_idx[original_action]
+        self._prev_action_args = original_action_args
 
     def _get_end_of_episode_info_components(self) -> List[str]:
         return super()._get_end_of_episode_info_components() + [
@@ -373,10 +399,20 @@ class DQNAgent(BaseAgent):
         """
 
         # Convert elements from the replay buffer to tensors
-        states, actions, action_args, rewards, dones, next_states = [i for i in batch]
+        states, actions, action_args, rewards, adjusted_rewards, scores, dones, next_states = [i for i in batch]
         states = torch.stack(states).to(device=self.device)
         next_states = torch.stack(next_states).to(device=self.device)
-        rewards_vals = torch.FloatTensor(rewards).to(device=self.device)
+        match self._reward_method:
+            case RewardMethod.SCORE:
+                rewards_to_use = scores
+            case RewardMethod.ADJUSTED_REWARD:
+                rewards_to_use = adjusted_rewards
+            case RewardMethod.REWARD:
+                rewards_to_use = rewards
+            case _:
+                self.logger.warning(f"Unknown reward method {self._reward_method.name} - using default rewards")
+                rewards_to_use = rewards
+        rewards_vals = torch.FloatTensor(rewards_to_use).to(device=self.device)
         actions_vals = torch.LongTensor(np.array(actions)).to(device=self.device).reshape(-1,1)
         dones_t = torch.BoolTensor(dones).to(device=self.device)
 

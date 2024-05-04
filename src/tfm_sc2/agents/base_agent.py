@@ -19,7 +19,7 @@ from typing_extensions import Self
 
 from ..actions import AllActions
 from ..constants import Constants, SC2Costs
-from ..types import Gas, Minerals, Position
+from ..types import AgentStage, Gas, Minerals, Position, RewardMethod
 from ..with_logger import WithLogger
 
 # from ..with_tracker import WithTracker
@@ -50,7 +50,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         # AllActions.ATTACK_WITH_FULL_ARMY: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag)
     }
 
-    def __init__(self, map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10, **kwargs):
+    def __init__(self, map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10, reward_method: RewardMethod = RewardMethod.REWARD, **kwargs):
         super().__init__(**kwargs)
         self._map_name = map_name
         self._map_config = map_config
@@ -68,6 +68,14 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._tracker: BaseEmissionsTracker = None
         self._tracker_update_freq_seconds = tracker_update_freq_seconds
         self._tracker_last_update = time.time()
+        self._prev_action = None
+        self._prev_action_args = None
+        self._prev_action_is_valid = None
+        self._prev_score = 0.
+        self._current_score = 0.
+        self._current_reward = 0.
+        self._current_adjusted_reward = 0.
+        self._reward_method = reward_method
 
         if checkpoint_path is not None:
             self._checkpoint_path = Path(checkpoint_path)
@@ -87,6 +95,10 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         )
 
         self.initialize()
+
+    @property
+    def _collect_stats(self) -> bool:
+        return True
 
     def initialize(self):
         self._current_episode_stats = EpisodeStats(map_name=self._map_name)
@@ -217,6 +229,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self.steps = agent_attrs["steps"]
         self.obs_spec = agent_attrs["obs_spec"]
         self.action_spec = agent_attrs["action_spec"]
+        self._reward_method = agent_attrs.get("reward_method", RewardMethod.REWARD)
         # From WithLogger
         self._log_name = agent_attrs["log_name"]
         if self.logger.name != self._log_name:
@@ -238,6 +251,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             steps=self.steps,
             obs_spec=self.obs_spec,
             action_spec=self.action_spec,
+            reward_method=self._reward_method,
             # From logger
             log_name=self._log_name,
         )
@@ -252,6 +266,13 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._train = False
         self._exploit = True
 
+    def _current_agent_stage(self):
+        if self._exploit:
+            return AgentStage.EXPLOIT
+        if self.is_training:
+            return AgentStage.TRAINING
+        return AgentStage.UNKNOWN
+
     def reset(self, **kwargs):
         super().reset(**kwargs)
         self._supply_depot_positions = None
@@ -263,9 +284,18 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._attempted_supply_depot_positions = None
         self._attempted_command_center_positions = None
         self._attempted_barrack_positions = None
+        self._prev_action = None
+        self._prev_action_args = None
+        self._prev_action_is_valid = None
+        self._prev_score = 0.
+        self._current_score = 0.
+        self._current_reward = 0.
+        self._current_adjusted_reward = 0.
 
-        self._current_episode_stats = EpisodeStats(map_name=self._map_name, is_training=self.is_training, is_exploit=self._exploit)
+        current_stage = self._current_agent_stage().name
+        self._current_episode_stats = EpisodeStats(map_name=self._map_name, is_burnin=False, is_training=self.is_training, is_exploit=self._exploit, episode=self.current_agent_stats.episode_count, initial_stage=current_stage)
         self.current_agent_stats.episode_count += 1
+        self.current_agent_stats.episode_count_per_stage[current_stage] += 1
 
     @property
     def is_training(self):
@@ -440,7 +470,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
             return action_args, True
         except AssertionError as error:
-            self.logger.warning(error)
+            self.logger.debug(error)
             return None, False
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
@@ -459,7 +489,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def update_command_center_positions(self, obs: TimeStep) -> Position:
         command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
         command_center_positions = [Position(cc.x, cc.y) for cc in command_centers]
-        self._used_command_center_positions = command_center_positions
+        enemy_command_centers = self.get_enemy_units(obs, unit_types=Constants.COMMAND_CENTER_UNIT_TYPES)
+        enemy_command_center_positions = [Position(cc.x, cc.y) for cc in enemy_command_centers]
+        self._used_command_center_positions = command_center_positions + enemy_command_center_positions
         # self._command_center_positions = [pos for pos in self._command_center_positions if pos not in command_center_positions]
 
     def use_command_center_position(self, obs: TimeStep, position: Position) -> Position:
@@ -524,49 +556,81 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
         barrack_positions = [Position(b.x, b.y) for b in barracks]
         self._used_barrack_positions = barrack_positions
-        # self._barrack_positions = [pos for pos in self._barrack_positions if pos not in barrack_positions]
+
+    def get_reward_and_score(self, obs: TimeStep) -> Tuple[float, float, float]:
+        reward = obs.reward
+        adjusted_reward = reward + Constants.STEP_REWARD
+        score_delta = obs.observation.score_cumulative.score - self._prev_score
+        if not (obs.last() or obs.first()):
+            if self._prev_action_is_valid == False:
+                adjusted_reward = Constants.INVALID_ACTION_REWARD
+                score_delta = Constants.INVALID_ACTION_REWARD
+            elif self._prev_action == AllActions.NO_OP:
+                adjusted_reward = Constants.NO_OP_REWARD
+                score_delta = Constants.NO_OP_REWARD
+        self._current_score = score_delta
+        self._current_reward = reward
+        self._current_adjusted_reward = adjusted_reward
+
+        return reward, adjusted_reward, score_delta
 
     def pre_step(self, obs: TimeStep):
-        self._current_episode_stats.reward += obs.reward
-        self._current_episode_stats.score = obs.observation.score_cumulative.score
+        reward, adjusted_reward, score = self.get_reward_and_score(obs)
+        self._current_episode_stats.reward += reward
+        self._current_episode_stats.adjusted_reward += adjusted_reward
+        self._current_episode_stats.score += score
         self._current_episode_stats.steps += 1
         self.current_agent_stats.step_count += 1
 
-    def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
+    def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any], original_action: AllActions, original_action_args: Dict[str, Any], is_valid_action: bool):
+        self._prev_score = obs.observation.score_cumulative.score
         if obs.last():
             emissions = self._tracker.flush() if self._tracker is not None else 0.
-            self.logger.info(f"End of episode - Got extra {emissions} since last update")
+            self.logger.debug(f"End of episode - Got extra {emissions} since last update")
             self._current_episode_stats.emissions += emissions
             self._current_episode_stats.is_training = self.is_training
             self._current_episode_stats.is_exploit = self._exploit
+            self._current_episode_stats.final_stage = self._current_agent_stage().name
             self._tracker_last_update = time.time()
             self.current_agent_stats.process_episode(self._current_episode_stats)
             self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
             self._episode_stats[self._map_name].append(self._current_episode_stats)
-            log_msg_parts = self._get_end_of_episode_info_components()
-            log_msg = " :: ".join(log_msg_parts)
+            log_msg_parts = ["\n=================", "================="] + self._get_end_of_episode_info_components() + ["=================", "================="]
+            log_msg = "\n".join(log_msg_parts)
             self.logger.info(log_msg)
         else:
             now = time.time()
             if (self._tracker is not None) and (now - self._tracker_last_update > self._tracker_update_freq_seconds):
-                emissions = self._tracker.flush()
-                self.logger.info(f"Tracker flush - Got extra {emissions} since last update")
+                emissions = self._tracker.flush() or 0.
+                self.logger.debug(f"Tracker flush - Got extra {emissions} since last update")
                 self._current_episode_stats.emissions += emissions
                 self._tracker_last_update = now
 
     def _get_end_of_episode_info_components(self) -> List[str]:
+        num_invalid = sum(self._current_episode_stats.invalid_action_counts.values())
+        num_valid = sum(self._current_episode_stats.valid_action_counts.values())
+        pct_invalid = num_invalid / (num_invalid + num_valid)
+        current_stage = self._current_agent_stage()
+        mean_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, reward_method=RewardMethod.REWARD)
+        mean_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, last_n=10, reward_method=RewardMethod.REWARD)
+        mean_adjusted_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, reward_method=RewardMethod.ADJUSTED_REWARD)
+        mean_adjusted_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, last_n=10, reward_method=RewardMethod.ADJUSTED_REWARD)
+        mean_scores = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, reward_method=RewardMethod.SCORE)
+        mean_scores_10 = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, last_n=10, reward_method=RewardMethod.SCORE)
+        episode_count = self.current_agent_stats.episode_count_per_stage[current_stage.name]
         return [
-            f"Episode {self.current_agent_stats.episode_count}",
-            f"Mean Rewards ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_rewards:.2f}",
-            f"Mean Rewards (10ep) {self.current_aggregated_episode_stats.mean_rewards_last_n_episodes(n=10):.2f}",
-            f"Mean Score ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_score:.2f}",
-            f"Mean Score (10ep) {self.current_aggregated_episode_stats.mean_score_last_n_episodes(n=10):.2f}",
-            f"Max reward {self.current_aggregated_episode_stats.max_reward:.2f}",
-            f"Max score {self.current_aggregated_episode_stats.max_score:.2f}",
-            f"Episode steps: {self._current_episode_stats.steps}",
-            f"Total steps: {self.current_agent_stats.step_count}",
-            f"Episode emissions: {self._current_episode_stats.emissions}",
-            f"Total emissions: {self.current_agent_stats.total_emissions}",
+            f"Stage: {self._current_agent_stage().name}",
+            f"Reward method: {self._reward_method.name}",
+            f"Episode {episode_count}",
+            f"Mean Rewards for stage ({episode_count} ep) {mean_rewards:.2f} / (10ep) {mean_rewards_10:.2f}",
+            f"Mean Adjusted Rewards for stage ({episode_count} ep) {mean_adjusted_rewards:.2f} / (10ep) {mean_adjusted_rewards_10:.2f}",
+            f"Mean Scores ({episode_count} ep) {mean_scores:.2f} / (10ep) {mean_scores_10:.2f}",
+            f"Episode steps: {self._current_episode_stats.steps} / Total steps: {self.current_agent_stats.step_count_per_stage[current_stage.name]}",
+            f"Invalid actions: {num_invalid}/{num_valid + num_invalid} ({100 * pct_invalid:.2f}%)",
+            f"Max reward {self.current_aggregated_episode_stats.max_reward_per_stage[current_stage.name]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_reward})",
+            f"Max adjusted reward {self.current_aggregated_episode_stats.max_adjusted_reward_per_stage[current_stage.name]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_adjusted_reward})",
+            f"Max score {self.current_aggregated_episode_stats.max_score_per_stage[current_stage.name]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_score})",
+            f"Episode emissions: {self._current_episode_stats.emissions} / Total in stage: {self.current_agent_stats.total_emissions_per_stage[current_stage.name]} / Total: {self.current_agent_stats.total_emissions}",
         ]
 
     def step(self, obs: TimeStep) -> AllActions:
@@ -576,12 +640,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         super().step(obs)
 
+        # if not obs.first():
+        #     import pdb
+        #     pdb.set_trace()
         self.update_supply_depot_positions(obs)
         self.update_command_center_positions(obs)
         self.update_barracks_positions(obs)
 
         action, action_args, is_valid_action = self.select_action(obs)
-
+        original_action = action
+        original_action_args = action_args
         # if not is_valid_action and (action == AllActions.ATTACK_WITH_SINGLE_UNIT) and self.can_take(obs, AllActions.RECRUIT_MARINE):
         #     self.logger.warning(f"Converting action {action.name} to RECRUIT_MARINE")
         #     action = AllActions.RECRUIT_MARINE
@@ -592,9 +660,10 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         #     action_args, is_valid_action = self._get_action_args(obs, action)
 
         if not is_valid_action:
-            self.logger.info(f"Action {action.name} is not valid anymore, returning NO_OP")
+            self.logger.debug(f"Action {action.name} is not valid anymore, returning NO_OP")
             action = AllActions.NO_OP
             action_args = None
+            self._current_episode_stats.add_invalid_action(action)
         elif action == AllActions.BUILD_BARRACKS:
             self.use_barracks_position(obs, action_args["target_position"])
         elif action == AllActions.BUILD_SUPPLY_DEPOT:
@@ -603,10 +672,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             self.use_command_center_position(obs, action_args["target_position"])
 
         if is_valid_action:
+            self._current_episode_stats.add_valid_action(action)
             self.logger.debug(f"[Step {self.steps}] Performing action {action.name} with args: {action_args}")
         game_action = self._action_to_game[action]
 
-        self.post_step(obs, action, action_args)
+        self.post_step(obs, action, action_args, original_action, original_action_args, is_valid_action)
 
         if action_args is not None:
             return game_action(**action_args)
@@ -653,13 +723,13 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         if action == AllActions.NO_OP:
             return True
         if action not in self.agent_actions:
-            self.logger.warning(f"Tried to validate action {action} that is not available for this agent. Allowed actions: {self.agent_actions}")
+            self.logger.warning(f"Tried to validate action {action.name} that is not available for this agent. Allowed actions: {self.agent_actions}")
             return False
         elif action not in self._map_config["available_actions"]:
-            self.logger.debug(f"Action {action} that is not available for this map.")
+            # self.logger.debug(f"Tried to validate action {action.name} that is not available for this map.")
             return False
         elif action not in self._action_to_game:
-            self.logger.warning(f"Tried to validate action {action} that is not yet implemented in the action to game mapper: {self._action_to_game.keys()}")
+            self.logger.warning(f"Tried to validate action {action.name} that is not yet implemented in the action to game mapper: {self._action_to_game.keys()}")
             return False
 
         def _has_target_unit_tag(args):
@@ -863,6 +933,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 if target_position is None:
                     self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build a command center")
                     return False
+
                 if not self.has_idle_workers(obs):
                     if not self.has_harvester_workers(obs):
                         self.logger.debug(f"[Action {action.name} ({action})] Player has no idle or harvester workers.")

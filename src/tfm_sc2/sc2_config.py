@@ -1,18 +1,14 @@
 
 from pysc2.env import sc2_env
 from pysc2.lib import features, units
-from tfm_sc2.actions import (
-    AllActions,
-    ArmyAttackManagerActions,
-    BaseManagerActions,
-)
+from tfm_sc2.actions import AllActions, ArmyAttackManagerActions, BaseManagerActions
 
 SC2_CONFIG = dict(
     agent_interface_format=features.AgentInterfaceFormat(
                     feature_dimensions=features.Dimensions(screen=256, minimap=64),
                     use_raw_units=True,
                     use_raw_actions=True),
-    step_mul=48,
+    step_mul=32,#48
     game_steps_per_episode=0,
     visualize=True,
     disable_fog=True

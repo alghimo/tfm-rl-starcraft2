@@ -1,5 +1,5 @@
 from collections import namedtuple
-from enum import IntEnum
+from enum import Enum, IntEnum
 
 from pysc2.lib.units import Neutral
 
@@ -63,3 +63,14 @@ class ScvState(IntEnum):
     HARVEST_GAS = 3
     MOVING = 4
     ATTACKING = 5
+
+class RewardMethod(IntEnum):
+    REWARD = 0
+    SCORE = 1
+    ADJUSTED_REWARD = 2
+
+class AgentStage(Enum):
+    BURN_IN = "burn-in"
+    EXPLOIT = "exploit"
+    TRAINING = "training"
+    UNKNOWN = "UNK"
