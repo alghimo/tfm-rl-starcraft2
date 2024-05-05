@@ -44,11 +44,6 @@ class DQNAgent(BaseAgent):
         """
         super().__init__(**kwargs)
 
-        if torch.cuda.is_available():
-            self.device = 'cuda'
-        else:
-            self.device = 'cpu'
-
         self.main_network = main_network
         self.target_network = target_network or deepcopy(main_network)
         self.hyperparams = hyperparams

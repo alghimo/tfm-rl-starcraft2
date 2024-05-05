@@ -127,13 +127,13 @@ class AggregatedEpisodeStats:
     def mean_emissions_last_n_episodes(self, n: int = 10) -> float:
         return np.mean(self.emissions[-n:])
 
-    def mean_rewards(self, stage: AgentStage = None, last_n: int = None, reward_method: RewardMethod = RewardMethod.REWARD) -> float:
+    def mean_rewards(self, stage: str = None, last_n: int = None, reward_method: RewardMethod = RewardMethod.REWARD) -> float:
         if reward_method == RewardMethod.REWARD:
-            rewards_source = self.rewards if stage is None else self.rewards_per_stage[stage.name]
+            rewards_source = self.rewards if stage is None else self.rewards_per_stage[stage]
         elif reward_method == RewardMethod.ADJUSTED_REWARD:
-            rewards_source = self.adjusted_rewards if stage is None else self.adjusted_rewards_per_stage[stage.name]
+            rewards_source = self.adjusted_rewards if stage is None else self.adjusted_rewards_per_stage[stage]
         elif reward_method == RewardMethod.SCORE:
-            rewards_source = self.scores if stage is None else self.scores_per_stage[stage.name]
+            rewards_source = self.scores if stage is None else self.scores_per_stage[stage]
 
         if last_n is None:
             return np.mean(rewards_source)

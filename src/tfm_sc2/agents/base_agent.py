@@ -54,10 +54,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     }
 
     def __init__(self,
-                 map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None,
-                 tracker_update_freq_seconds: int = 10, reward_method: RewardMethod = RewardMethod.REWARD,
-                 buffer: ExperienceReplayBuffer = None, **kwargs):
+                 map_name: str, map_config: Dict, buffer: ExperienceReplayBuffer = None,
+                 train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10,
+                 reward_method: RewardMethod = RewardMethod.REWARD, **kwargs):
         super().__init__(**kwargs)
+
+        if torch.cuda.is_available():
+            self.device = 'cuda'
+        else:
+            self.device = 'cpu'
+
         self._map_name = map_name
         self._map_config = map_config
         self._supply_depot_positions = None
@@ -163,19 +169,24 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         with open(self._agent_path, "wb") as f:
             pickle.dump(agent_attrs, f)
+            self.logger.info(f"Saved agent attributes to {self._agent_path}")
 
         self.save_stats(self.checkpoint_path)
 
         if self._buffer is not None:
             with open(self._buffer_path, "wb") as f:
                 pickle.dump(self._buffer, f)
+                self.logger.info(f"Saved memory replay buffer to {self._buffer_path}")
 
     @classmethod
-    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict) -> Self:
+    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict, buffer: ExperienceReplayBuffer = None) -> Self:
         checkpoint_path = Path(checkpoint_path)
         agent_attrs_file = checkpoint_path / cls._AGENT_FILE
         with open(agent_attrs_file, mode="rb") as f:
             agent_attrs = pickle.load(f)
+
+        if buffer is not None:
+            agent_attrs["buffer"] = buffer
 
         init_attrs = cls._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
         agent = cls(**init_attrs)
@@ -655,7 +666,8 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             self._num_actions = len(self.agent_actions)
         else:
             done = obs.last()
-            self._buffer.append(self._prev_state, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self._current_state)
+            if self._buffer is not None:
+                self._buffer.append(self._prev_state, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self._current_state)
 
     def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any], original_action: AllActions, original_action_args: Dict[str, Any], is_valid_action: bool):
         self._prev_score = obs.observation.score_cumulative.score
@@ -689,27 +701,27 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         num_invalid = sum(self._current_episode_stats.invalid_action_counts.values())
         num_valid = sum(self._current_episode_stats.valid_action_counts.values())
         pct_invalid = num_invalid / (num_invalid + num_valid)
-        current_stage = self._current_agent_stage()
-        mean_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, reward_method=RewardMethod.REWARD)
-        mean_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, last_n=10, reward_method=RewardMethod.REWARD)
-        mean_adjusted_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, reward_method=RewardMethod.ADJUSTED_REWARD)
-        mean_adjusted_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, last_n=10, reward_method=RewardMethod.ADJUSTED_REWARD)
-        mean_scores = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, reward_method=RewardMethod.SCORE)
-        mean_scores_10 = self.current_aggregated_episode_stats.mean_rewards(stage=current_stage, last_n=10, reward_method=RewardMethod.SCORE)
-        episode_count = self.current_agent_stats.episode_count_per_stage[current_stage.name]
+        episode_stage = self._current_episode_stats.initial_stage
+        mean_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, reward_method=RewardMethod.REWARD)
+        mean_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, last_n=10, reward_method=RewardMethod.REWARD)
+        mean_adjusted_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, reward_method=RewardMethod.ADJUSTED_REWARD)
+        mean_adjusted_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, last_n=10, reward_method=RewardMethod.ADJUSTED_REWARD)
+        mean_scores = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, reward_method=RewardMethod.SCORE)
+        mean_scores_10 = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, last_n=10, reward_method=RewardMethod.SCORE)
+        episode_count = self.current_agent_stats.episode_count_per_stage[episode_stage]
         return [
-            f"Stage: {self._current_agent_stage().name}",
+            f"Episode {self._map_name} // Stage: {episode_stage} // Final stage: {self._current_agent_stage().name}",
             f"Reward method: {self._reward_method.name}",
             f"Episode {episode_count}",
             f"Mean Rewards for stage ({episode_count} ep) {mean_rewards:.2f} / (10ep) {mean_rewards_10:.2f}",
             f"Mean Adjusted Rewards for stage ({episode_count} ep) {mean_adjusted_rewards:.2f} / (10ep) {mean_adjusted_rewards_10:.2f}",
             f"Mean Scores ({episode_count} ep) {mean_scores:.2f} / (10ep) {mean_scores_10:.2f}",
-            f"Episode steps: {self._current_episode_stats.steps} / Total steps: {self.current_agent_stats.step_count_per_stage[current_stage.name]}",
+            f"Episode steps: {self._current_episode_stats.steps} / Total steps: {self.current_agent_stats.step_count_per_stage[episode_stage]}",
             f"Invalid actions: {num_invalid}/{num_valid + num_invalid} ({100 * pct_invalid:.2f}%)",
-            f"Max reward {self.current_aggregated_episode_stats.max_reward_per_stage[current_stage.name]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_reward})",
-            f"Max adjusted reward {self.current_aggregated_episode_stats.max_adjusted_reward_per_stage[current_stage.name]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_adjusted_reward})",
-            f"Max score {self.current_aggregated_episode_stats.max_score_per_stage[current_stage.name]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_score})",
-            f"Episode emissions: {self._current_episode_stats.emissions} / Total in stage: {self.current_agent_stats.total_emissions_per_stage[current_stage.name]} / Total: {self.current_agent_stats.total_emissions}",
+            f"Max reward {self.current_aggregated_episode_stats.max_reward_per_stage[episode_stage]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_reward})",
+            f"Max adjusted reward {self.current_aggregated_episode_stats.max_adjusted_reward_per_stage[episode_stage]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_adjusted_reward})",
+            f"Max score {self.current_aggregated_episode_stats.max_score_per_stage[episode_stage]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_score})",
+            f"Episode emissions: {self._current_episode_stats.emissions} / Total in stage: {self.current_agent_stats.total_emissions_per_stage[episode_stage]} / Total: {self.current_agent_stats.total_emissions}",
         ]
 
     def step(self, obs: TimeStep) -> AllActions:
