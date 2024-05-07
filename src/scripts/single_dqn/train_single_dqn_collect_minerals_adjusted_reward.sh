@@ -28,7 +28,6 @@ export TRAIN_EPISODES=500
 # export MAP=Simple64
 # export TRAIN_EPISODES=300
 
-export TRAIN_EPISODES=300
 export LOG_SUFFIX="_01"
 
 source ${SCRIPT_DIR}/train_${AGENT_TYPE}_${AGENT_ALGORITHM}_agent.sh

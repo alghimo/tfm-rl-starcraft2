@@ -105,12 +105,15 @@ class DQNAgent(BaseAgent):
         self.initial_epsilon = agent_attrs["initial_epsilon"]
         self._num_actions = agent_attrs["num_actions"]
         self.loss = agent_attrs["loss"]
+        if "epsilon" in agent_attrs:
+            self.epsilon = agent_attrs["epsilon"]
 
     def _get_agent_attrs(self):
         parent_attrs = super()._get_agent_attrs()
         return dict(
             hyperparams=self.hyperparams,
             initial_epsilon=self.initial_epsilon,
+            epsilon=self.epsilon,
             main_network_path=self._main_network_path,
             target_network_path=self._target_network_path,
             num_actions=self._num_actions,
