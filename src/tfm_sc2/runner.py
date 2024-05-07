@@ -22,6 +22,7 @@ from tfm_sc2.networks.experience_replay_buffer import ExperienceReplayBuffer
 from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
 from tfm_sc2.types import RewardMethod
 from tfm_sc2.with_logger import WithLogger
+from torch import optim
 
 FLAGS = flags.FLAGS
 
@@ -59,17 +60,9 @@ def create_dqn():
     model_layers = [256, 128, 128, 64, 32]
     obs_input_shape = len(State._fields)
     learning_rate = 1e-5
-    dqn = DQNNetwork(model_layers=model_layers, observation_space_shape=obs_input_shape, num_actions=num_actions, learning_rate=learning_rate)
-    """
-    batch_size=512,
-							 gamma=0.999,
-							 eps_start=0.9,
-							 eps_end=0.05,
-							 eps_decay=100000,
-							 tau=0.7,
-							 lr=1e-5,
-							 memory_len=10000):
-    """
+    lr_milestones = FLAGS.lr_milestones
+    dqn = DQNNetwork(model_layers=model_layers, observation_space_shape=obs_input_shape, num_actions=num_actions, learning_rate=learning_rate, lr_milestones=lr_milestones)
+
     return dqn
 
 def create_dqn_agent(cls, map_name, map_config, main_network: DQNNetwork, checkpoint_path: Path, log_name: str, exploit: bool, reward_method: RewardMethod, memory_size: int = 100000, burn_in: int = 10000, target_network: DQNNetwork = None, buffer: ExperienceReplayBuffer = None, **extra_agent_args):
@@ -103,6 +96,8 @@ def load_or_create_dqn_agent(cls, map_name, map_config, load_agent: bool, checkp
     else:
         # HEre we allow buffer to be None. In that case, the agent's buffer is loaded, otherwise it will be replaced
         agent = load_dqn_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer)
+        if FLAGS.reset_epsilon:
+            agent.epsilon = agent.initial_epsilon
 
     return agent
 
@@ -379,12 +374,15 @@ if __name__ == "__main__":
     flags.DEFINE_integer("memory_size", None, required=False, help="Total memory size for the buffer.", lower_bound=100)
     flags.DEFINE_integer("burn_in", None, required=False, help="Burn-in size for the buffer.", lower_bound=0)
     flags.DEFINE_float("epsilon_decay", 0.99, required=False, help="Epsilon decay for DQN agents.", lower_bound=0.01)
+    #flags.DEFINE_integer("lr_milestone1", 0.99, required=False, help="Epsilon decay for DQN agents.", lower_bound=0.01)
+    flags.DEFINE_list("lr_milestones", default=[], required=False, help="LR will be decayed (divided by 10) each time one of the episodes on this list is reached")
     flags.DEFINE_integer("max_burnin_episodes", 200, "Meximum number of episodes to allow to use for burning replay memories in.", lower_bound=0)
     flags.DEFINE_string("model_id", default=None, help="Determines the folder inside 'models_path' to save the model to", required=False)
     flags.DEFINE_string("models_path", help="Path where checkpoints are written to/loaded from", required=False, default=DEFAULT_MODELS_PATH)
     flags.DEFINE_string("buffer_file", help="Path to a buffer to use instead of an empty buffer. Useful to skip burn-ins", required=False, default=None)
     flags.DEFINE_integer("save_frequency_episodes", default=1, help="We save the agent every X episodes.", lower_bound=1, required=False)
     flags.DEFINE_boolean("exploit", default=False, required=False, help="Use the agent in explotation mode, not for training.")
+    flags.DEFINE_boolean("reset_epsilon", default=False, required=False, help="Reset epsilon to its default when loading an agent.")
     flags.DEFINE_boolean("save_agent", default=True, required=False, help="Whether to save the agent and/or its stats.")
     flags.DEFINE_boolean("random_mode", default=False, required=False, help="Tell the agent to run in random mode. Used mostly to ensure we collect experiences.")
     flags.DEFINE_boolean("export_stats_only", default=False, required=False, help="Set it to true if you only want to load the agent and export its stats.")

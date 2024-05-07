@@ -318,7 +318,10 @@ class DQNAgent(BaseAgent):
 
         loss = self._calculate_loss(batch)# Get batch loss
         loss.backward() # Backward pass to get gradients
-        self.main_network.optimizer.step() # Apply the gradients to the main network
+        if hasattr(self.main_network, "scheduler") and (self.main_network.scheduler is not None):
+            self.main_network.scheduler.step() # Apply the gradients to the main network
+        else:
+            self.main_network.optimizer.step() # Apply the gradients to the main network
 
         if self.device == 'cuda':
             loss = loss.detach().cpu().numpy()

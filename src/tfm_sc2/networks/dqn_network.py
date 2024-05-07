@@ -15,7 +15,7 @@ class DQNNetwork(nn.Module, ABC):
     also not check that the input/output features of the network layers
     matches the shape of the observation /action space.
     """
-    def __init__(self, model_layers: List[nn.Module] | List[int], observation_space_shape: int, num_actions: int, learning_rate: float, **kwargs):
+    def __init__(self, model_layers: List[nn.Module] | List[int], observation_space_shape: int, num_actions: int, learning_rate: float, lr_milestones: list[int] = None, **kwargs):
         super().__init__(**kwargs)
 
         self.input_shape = observation_space_shape #env.observation_space.shape[0]
@@ -32,8 +32,15 @@ class DQNNetwork(nn.Module, ABC):
 
         model = torch.nn.Sequential(*model_layers)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+        if lr_milestones is not None and any(lr_milestones):
+            scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=lr_milestones, gamma=0.1)
+        else:
+            scheduler = None
+
         self.model = model.to(device=self.device)
         self.optimizer = optimizer
+        self.scheduler = scheduler
 
 
     def _get_model_layers_from_number_of_units(self, layer_units: List[int], num_inputs: int, num_outputs: int):
