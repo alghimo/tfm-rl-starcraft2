@@ -731,9 +731,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         super().step(obs)
 
-        # if not obs.first():
-        #     import pdb
-        #     pdb.set_trace()
         self.update_supply_depot_positions(obs)
         self.update_command_center_positions(obs)
         self.update_barracks_positions(obs)

@@ -12,10 +12,6 @@ export AGENT_TYPE="single"
 export AGENT_ALGORITHM="dqn"
 
 export MODEL_ID=curriculum
-export MAP_ID=collect_minerals
-export MAP=CollectMineralsAndGas
-export TRAIN_EPISODES=500
-
 export LOG_SUFFIX="_01"
 
 AGENT_KEY="${AGENT_TYPE}.${AGENT_ALGORITHM}"
@@ -44,6 +40,8 @@ python ${PYTHON_SCRIPTS_DIR}/runner.py \
     --epsilon_decay ${EPSILON_DECAY} \
     --reward_method ${REWARD_METHOD} 2>&1 | tee ${MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
 touch ${MODEL_DIR}/_02_${MAP_ID}_training_done_${TRAIN_EPISODES}_ep
+cp ${MODEL_DIR}/buffer.pkl cp ${MODEL_DIR}/${MAP_ID}_buffer.pkl
+
 
 export MAP_ID=build_marines
 export MAP=BuildMarines
@@ -66,6 +64,7 @@ python ${PYTHON_SCRIPTS_DIR}/runner.py \
     --reset_epsilon \
     --reward_method ${REWARD_METHOD} 2>&1 | tee ${MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
 touch ${MODEL_DIR}/_04_${MAP_ID}_training_done_${TRAIN_EPISODES}_ep
+cp ${MODEL_DIR}/buffer.pkl cp ${MODEL_DIR}/${MAP_ID}_buffer.pkl
 
 export MAP_ID=defeat_zerglings_and_banelings
 export MAP=DefeatZerglingsAndBanelings
@@ -88,6 +87,7 @@ python ${PYTHON_SCRIPTS_DIR}/runner.py \
     --reset_epsilon \
     --reward_method ${REWARD_METHOD} 2>&1 | tee ${MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
 touch ${MODEL_DIR}/_06_${MAP_ID}_training_done_${TRAIN_EPISODES}_ep
+cp ${MODEL_DIR}/buffer.pkl cp ${MODEL_DIR}/${MAP_ID}_buffer.pkl
 
 export MAP_ID=simple64
 export MAP=Simple64
@@ -109,3 +109,4 @@ python ${PYTHON_SCRIPTS_DIR}/runner.py \
     --reset_epsilon \
     --reward_method ${REWARD_METHOD} 2>&1 | tee ${MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
 touch ${MODEL_DIR}/_08_${MAP_ID}_training_done_${TRAIN_EPISODES}_ep
+cp ${MODEL_DIR}/buffer.pkl cp ${MODEL_DIR}/${MAP_ID}_buffer.pkl
