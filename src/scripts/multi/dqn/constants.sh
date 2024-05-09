@@ -1,7 +1,9 @@
 #!/bin/bash
 
-DQN_CONSTANTS_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-SINGLE_DIR=$(realpath $(dirname ${DQN_CONSTANTS_DIR}))
-source ${SCRIPTS_DIR}/constants.sh
+DQN_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+echo "DQN_DIR2: ${DQN_DIR}"
+AGENT_TYPE_DIR=$(realpath $(dirname ${DQN_DIR}))
+echo "AGENT_TYPE_DIR: ${AGENT_TYPE_DIR}"
+source ${AGENT_TYPE_DIR}/constants.sh
 
 export AGENT_ALGORITHM="dqn"

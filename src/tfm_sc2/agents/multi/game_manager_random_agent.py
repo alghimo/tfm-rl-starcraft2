@@ -4,9 +4,7 @@ from typing import Any, Dict, Tuple
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions
 
-from ...actions import (
-    AllActions,
-)
+from ...actions import AllActions
 from ..base_agent import BaseAgent
 
 FUNCTIONS = actions.FUNCTIONS
@@ -19,5 +17,3 @@ class GameManagerRandomAgent(GameManagerBaseAgent, BaseAgent):
         action = random.choice(self.agent_actions)
 
         return self.forward_action(obs=obs, action=action)
-
-

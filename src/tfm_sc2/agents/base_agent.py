@@ -121,6 +121,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def _collect_stats(self) -> bool:
         return True
 
+    def setup_actions(self):
+        self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
+        self._action_to_idx = { action: idx for idx, action in enumerate(self.agent_actions) }
+        self._num_actions = len(self.agent_actions)
+
     def initialize(self):
         self._current_episode_stats = EpisodeStats(map_name=self._map_name)
         self._episode_stats = {self._map_name: []}
@@ -179,7 +184,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 self.logger.info(f"Saved memory replay buffer to {self._buffer_path}")
 
     @classmethod
-    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict, buffer: ExperienceReplayBuffer = None) -> Self:
+    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict, buffer: ExperienceReplayBuffer = None, **kwargs) -> Self:
         checkpoint_path = Path(checkpoint_path)
         agent_attrs_file = checkpoint_path / cls._AGENT_FILE
         with open(agent_attrs_file, mode="rb") as f:
@@ -189,7 +194,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             agent_attrs["buffer"] = buffer
 
         init_attrs = cls._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
-        agent = cls(**init_attrs)
+        agent = cls(**init_attrs, **kwargs)
         agent._load_agent_attrs(agent_attrs)
 
         if agent._current_episode_stats is None or agent._current_episode_stats.map_name != map_name:
@@ -653,18 +658,17 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
     def pre_step(self, obs: TimeStep):
         self._current_state = self._convert_obs_to_state(obs)
-        reward, adjusted_reward, score = self.get_reward_and_score(obs)
-        self._current_episode_stats.reward += reward
-        self._current_episode_stats.adjusted_reward += adjusted_reward
-        self._current_episode_stats.score += score
-        self._current_episode_stats.steps += 1
-        self.current_agent_stats.step_count += 1
+        if not self._exploit:
+            reward, adjusted_reward, score = self.get_reward_and_score(obs)
+            self._current_episode_stats.reward += reward
+            self._current_episode_stats.adjusted_reward += adjusted_reward
+            self._current_episode_stats.score += score
+            self._current_episode_stats.steps += 1
+            self.current_agent_stats.step_count += 1
 
         if obs.first():
-            self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
-            self._action_to_idx = { action: idx for idx, action in enumerate(self.agent_actions) }
-            self._num_actions = len(self.agent_actions)
-        else:
+            self.setup_actions()
+        elif not self._exploit:
             done = obs.last()
             if self._buffer is not None:
                 self._buffer.append(self._prev_state, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self._current_state)
@@ -675,27 +679,28 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._prev_action = self._action_to_idx[original_action]
         self._prev_action_args = original_action_args
 
-        if obs.last():
-            emissions = self._tracker.flush() if self._tracker is not None else 0.
-            self.logger.debug(f"End of episode - Got extra {emissions} since last update")
-            self._current_episode_stats.emissions += emissions
-            self._current_episode_stats.is_training = self.is_training
-            self._current_episode_stats.is_exploit = self._exploit
-            self._current_episode_stats.final_stage = self._current_agent_stage().name
-            self._tracker_last_update = time.time()
-            self.current_agent_stats.process_episode(self._current_episode_stats)
-            self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
-            self._episode_stats[self._map_name].append(self._current_episode_stats)
-            log_msg_parts = ["\n=================", "================="] + self._get_end_of_episode_info_components() + ["=================", "================="]
-            log_msg = "\n".join(log_msg_parts)
-            self.logger.info(log_msg)
-        else:
-            now = time.time()
-            if (self._tracker is not None) and (now - self._tracker_last_update > self._tracker_update_freq_seconds):
-                emissions = self._tracker.flush() or 0.
-                self.logger.debug(f"Tracker flush - Got extra {emissions} since last update")
+        if not self._exploit:
+            if obs.last():
+                emissions = self._tracker.flush() if self._tracker is not None else 0.
+                self.logger.debug(f"End of episode - Got extra {emissions} since last update")
                 self._current_episode_stats.emissions += emissions
-                self._tracker_last_update = now
+                self._current_episode_stats.is_training = self.is_training
+                self._current_episode_stats.is_exploit = self._exploit
+                self._current_episode_stats.final_stage = self._current_agent_stage().name
+                self._tracker_last_update = time.time()
+                self.current_agent_stats.process_episode(self._current_episode_stats)
+                self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
+                self._episode_stats[self._map_name].append(self._current_episode_stats)
+                log_msg_parts = ["\n=================", "================="] + self._get_end_of_episode_info_components() + ["=================", "================="]
+                log_msg = "\n".join(log_msg_parts)
+                self.logger.info(log_msg)
+            else:
+                now = time.time()
+                if (self._tracker is not None) and (now - self._tracker_last_update > self._tracker_update_freq_seconds):
+                    emissions = self._tracker.flush() or 0.
+                    self.logger.debug(f"Tracker flush - Got extra {emissions} since last update")
+                    self._current_episode_stats.emissions += emissions
+                    self._tracker_last_update = now
 
     def _get_end_of_episode_info_components(self) -> List[str]:
         num_invalid = sum(self._current_episode_stats.invalid_action_counts.values())
@@ -724,7 +729,10 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             f"Episode emissions: {self._current_episode_stats.emissions} / Total in stage: {self.current_agent_stats.total_emissions_per_stage[episode_stage]} / Total: {self.current_agent_stats.total_emissions}",
         ]
 
-    def step(self, obs: TimeStep) -> AllActions:
+    def step(self, obs: TimeStep, only_super_step: bool = False) -> AllActions:
+        if only_super_step:
+            super().step(obs)
+            return
         if obs.first():
             self._setup_positions(obs)
         self.pre_step(obs)
@@ -738,14 +746,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         action, action_args, is_valid_action = self.select_action(obs)
         original_action = action
         original_action_args = action_args
-        # if not is_valid_action and (action == AllActions.ATTACK_WITH_SINGLE_UNIT) and self.can_take(obs, AllActions.RECRUIT_MARINE):
-        #     self.logger.warning(f"Converting action {action.name} to RECRUIT_MARINE")
-        #     action = AllActions.RECRUIT_MARINE
-        #     action_args, is_valid_action = self._get_action_args(obs, action)
-        # if not is_valid_action and (action == AllActions.RECRUIT_MARINE) and self.can_take(obs, AllActions.BUILD_BARRACKS):
-        #     self.logger.warning(f"Converting action {action.name} to BUILD_BARRACKS")
-        #     action = AllActions.BUILD_BARRACKS
-        #     action_args, is_valid_action = self._get_action_args(obs, action)
 
         if not is_valid_action:
             self.logger.debug(f"Action {action.name} is not valid anymore, returning NO_OP")

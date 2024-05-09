@@ -202,12 +202,6 @@ class DQNAgent(BaseAgent):
 
     def pre_step(self, obs: TimeStep):
         super().pre_step(obs)
-        # self._current_state = self._convert_obs_to_state(obs)
-
-        # self._current_episode_stats.reward += reward
-        # self._current_episode_stats.steps += 1
-        # self.current_agent_stats.step_count += 1
-
         if not obs.first():
             # do updates
             done = obs.last()
