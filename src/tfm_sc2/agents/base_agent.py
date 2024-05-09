@@ -688,6 +688,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 self._current_episode_stats.is_exploit = self._exploit
                 self._current_episode_stats.final_stage = self._current_agent_stage().name
                 self._tracker_last_update = time.time()
+                episode_stage = self._current_episode_stats.initial_stage
+                max_rewards = self.current_aggregated_episode_stats.max_adjusted_reward_per_stage[episode_stage]
+
+                if (self.is_training) and (self.checkpoint_path is not None) and (max_rewards is not None) and (self._current_episode_stats.reward > max_rewards):
+                    self.logger.info(f"New max reward during training ({max_rewards:.2f} -> {self._current_episode_stats.reward:.2f}). Saving best agent...")
+                    checkpoint_path = self.checkpoint_path
+                    save_path = self.checkpoint_path / "best_agent"
+                    self.save(checkpoint_path=save_path)
+                    self.checkpoint_path = checkpoint_path
+
                 self.current_agent_stats.process_episode(self._current_episode_stats)
                 self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
                 self._episode_stats[self._map_name].append(self._current_episode_stats)
