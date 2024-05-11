@@ -87,9 +87,26 @@ def create_dqn():
     else:
         logger.info(f"Creating DQN with AllActions for agent {agent_key}")
         num_actions = len(AllActions)
-    model_layers = [256, 128, 128, 64, 32]
+
+    match FLAGS.dqn_size:
+        case "extra_small":
+            model_layers = [64, 32]
+            logger.info(f"Using extra small network ({model_layers}) for agent {agent_key}")
+        case "small":
+            model_layers = [128, 64, 32]
+            logger.info(f"Using small network ({model_layers}) for agent {agent_key}")
+        case "medium":
+            model_layers = [128, 128, 64, 32]
+            logger.info(f"Using medium network ({model_layers}) for agent {agent_key}")
+        case "large":
+            model_layers = [256, 128, 128, 64, 32]
+            logger.info(f"Using large network ({model_layers}) for agent {agent_key}")
+        case "extra_large":
+            model_layers = [512, 256, 128, 128, 64, 32]
+            logger.info(f"Using extra large network ({model_layers}) for agent {agent_key}")
+
     obs_input_shape = len(State._fields)
-    learning_rate = 1e-5
+    learning_rate = FLAGS.lr
     lr_milestones = FLAGS.lr_milestones
     dqn = DQNNetwork(model_layers=model_layers, observation_space_shape=obs_input_shape, num_actions=num_actions, learning_rate=learning_rate, lr_milestones=lr_milestones)
 
@@ -409,13 +426,16 @@ if __name__ == "__main__":
     flags.DEFINE_enum("agent_key", "single.random", agent_keys, "Agent to use.")
     flags.DEFINE_enum("map_name", "Simple64", map_keys, "Map to use.")
     flags.DEFINE_enum("reward_method", default="reward", required=False, enum_values=["reward", "adjusted_reward", "score"], help="What to use to calculate rewards: reward = observation reward, adjusted_reward = observation reward with penalties for step, no-ops and invalid actions, or score deltas (i.e. score increase / decrease + penalty for invalid actions and no-ops).")
+    flags.DEFINE_enum("dqn_size", "large", ["extra_small", "small", "medium", "large", "extra_large"], "Map to use.")
     flags.DEFINE_integer("num_episodes", 1, "Number of episodes to play.", lower_bound=1)
+
     flags.DEFINE_integer("memory_size", 100000, required=False, help="Total memory size for the buffer.", lower_bound=100)
     flags.DEFINE_integer("burn_in", 10000, required=False, help="Burn-in size for the buffer.", lower_bound=0)
     flags.DEFINE_float("epsilon_decay", 0.99, required=False, help="Epsilon decay for DQN agents.", lower_bound=0.01)
     #flags.DEFINE_integer("lr_milestone1", 0.99, required=False, help="Epsilon decay for DQN agents.", lower_bound=0.01)
+    flags.DEFINE_float("lr", 1e-4, required=False, help="Learning rate for DQN agents.", upper_bound=1.)
     flags.DEFINE_list("lr_milestones", default=[], required=False, help="LR will be decayed (divided by 10) each time one of the episodes on this list is reached")
-    flags.DEFINE_integer("max_burnin_episodes", 200, "Meximum number of episodes to allow to use for burning replay memories in.", lower_bound=0)
+    flags.DEFINE_integer("max_burnin_episodes", 500, "Meximum number of episodes to allow to use for burning replay memories in.", lower_bound=0)
     flags.DEFINE_string("model_id", default=None, help="Determines the folder inside 'models_path' to save the model to", required=False)
     flags.DEFINE_string("models_path", help="Path where checkpoints are written to/loaded from", required=False, default=DEFAULT_MODELS_PATH)
     flags.DEFINE_string("buffer_file", help="Path to a buffer to use instead of an empty buffer. Useful to skip burn-ins", required=False, default=None)

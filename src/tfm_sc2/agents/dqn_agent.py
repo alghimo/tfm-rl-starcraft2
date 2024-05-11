@@ -164,7 +164,7 @@ class DQNAgent(BaseAgent):
         valid_actions = self._actions_to_network(available_actions)
         if not any(valid_actions):
             valid_actions = None
-        if (self._random_mode) or (self._train and self._is_burnin):
+        if (not self._exploit) and (self._is_burnin or self._random_mode):
             if self._random_mode:
                 self.logger.debug(f"Random mode - collecting experience from random actions")
             elif not self._status_flags["burnin_started"]:
@@ -207,7 +207,7 @@ class DQNAgent(BaseAgent):
             done = obs.last()
             # self._buffer.append(self._prev_state, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self._current_state)
 
-            if self.is_training:
+            if (not self._is_burnin) and self.is_training:
                 main_net_updated = False
                 target_net_updated = False
                 if self.hyperparams.main_network_update_frequency > -1:

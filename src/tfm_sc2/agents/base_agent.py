@@ -609,6 +609,14 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             elif self._prev_action == AllActions.NO_OP:
                 adjusted_reward = Constants.NO_OP_REWARD
                 score_delta = Constants.NO_OP_REWARD
+
+        # if obs.last() and "reward_factor" in self._map_config:
+        #     reward_factor = self._map_config["reward_factor"]
+        #     self.logger.info(f"Adjusting end of episode rewards with a factor of {reward_factor}")
+        #     reward *= reward_factor
+        #     adjusted_reward *= reward_factor
+        #     score_delta *= reward_factor
+
         self._current_score = score_delta
         self._current_reward = reward
         self._current_adjusted_reward = adjusted_reward
@@ -689,12 +697,14 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 self._current_episode_stats.final_stage = self._current_agent_stage().name
                 self._tracker_last_update = time.time()
                 episode_stage = self._current_episode_stats.initial_stage
-                max_rewards = self.current_aggregated_episode_stats.max_adjusted_reward_per_stage[episode_stage]
+                max_score = self.current_aggregated_episode_stats.max_score_per_stage[episode_stage]
+                new_max_score = (max_score is not None) and (self._current_episode_stats.score > max_score)
 
-                if (self.is_training) and (self.checkpoint_path is not None) and (max_rewards is not None) and (self._current_episode_stats.reward > max_rewards):
-                    self.logger.info(f"New max reward during training ({max_rewards:.2f} -> {self._current_episode_stats.reward:.2f}). Saving best agent...")
+                if (self.is_training) and (self.checkpoint_path is not None) and new_max_score:
+                    self.logger.info(f"New max reward during training ({max_score:.2f} -> {self._current_episode_stats.score:.2f}). Saving best agent...")
                     checkpoint_path = self.checkpoint_path
                     save_path = self.checkpoint_path / "best_agent"
+                    save_path.mkdir(exist_ok=True, parents=True)
                     self.save(checkpoint_path=save_path)
                     self.checkpoint_path = checkpoint_path
 
