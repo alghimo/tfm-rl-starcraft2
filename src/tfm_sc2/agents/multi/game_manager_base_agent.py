@@ -1,4 +1,4 @@
-
+import numpy as np
 from pysc2.env.environment import TimeStep
 from pysc2.lib import actions
 
@@ -19,6 +19,9 @@ class GameManagerBaseAgent(WithGameManagerActions):
         self._army_recruit_manager = army_recruit_manager
         self._army_attack_manager = army_attack_manager
 
+        self._base_manager.exploit()
+        self._army_recruit_manager.exploit()
+        self._army_attack_manager.exploit()
         self._base_manager.setup_actions()
         self._army_recruit_manager.setup_actions()
         self._army_attack_manager.setup_actions()
@@ -27,13 +30,15 @@ class GameManagerBaseAgent(WithGameManagerActions):
         match action:
             case GameManagerActions.EXPAND_BASE:
                 proxy_manager = self._base_manager
+                actual_action, action_args, is_valid_action = proxy_manager.select_action(obs=obs)
             case GameManagerActions.EXPAND_ARMY:
                 proxy_manager = self._army_recruit_manager
+                actual_action, action_args, is_valid_action = proxy_manager.select_action(obs=obs)
             case GameManagerActions.ATTACK:
                 proxy_manager = self._army_attack_manager
-
-        actual_action = proxy_manager.select_action(obs=obs)
-        action_args, is_valid_action = proxy_manager._get_action_args(obs=obs, action=action)
+                actual_action, action_args, is_valid_action = proxy_manager.select_action(obs=obs)
+            case _:
+                raise RuntimeError(f"Unknown action: {action.name}")
 
         return actual_action, action_args, is_valid_action, proxy_manager
 
@@ -49,8 +54,7 @@ class GameManagerBaseAgent(WithGameManagerActions):
             self._base_manager._setup_positions(obs)
             self._army_recruit_manager._setup_positions(obs)
             self._army_attack_manager._setup_positions(obs)
-        # import pdb
-        # pdb.set_trace()
+
         self.pre_step(obs)
 
         super().step(obs, only_super_step=True)
@@ -68,9 +72,24 @@ class GameManagerBaseAgent(WithGameManagerActions):
         self._army_recruit_manager.update_barracks_positions(obs)
         self._army_attack_manager.update_barracks_positions(obs)
 
-        game_manager_action = self.select_action(obs)
+        available_actions = [a for a in self.agent_actions]
+
+        game_manager_action = self.select_action(obs, valid_actions=available_actions)
 
         action, action_args, is_valid_action, proxy_manager = self.forward_action(obs=obs, action=game_manager_action)
+
+        if action == AllActions.NO_OP:
+            self.logger.debug(f"Proxy manager for action {game_manager_action.name} returned a no-op, selecting a different action...")
+            available_actions = [a for a in available_actions if a != game_manager_action]
+            game_manager_action = self.select_action(obs, valid_actions=available_actions)
+
+            action, action_args, is_valid_action, proxy_manager = self.forward_action(obs=obs, action=game_manager_action)
+            if action == AllActions.NO_OP:
+                self.logger.debug(f"Proxy manager for action {game_manager_action.name} also returned a no-op, selecting the remaining action...")
+                available_actions = [a for a in available_actions if a != game_manager_action]
+                game_manager_action = available_actions[0]
+                action, action_args, is_valid_action, proxy_manager = self.forward_action(obs=obs, action=game_manager_action)
+
         original_action = action
         if not is_valid_action:
             self.logger.debug(f"Sub-agent action {action.name} is not valid anymore, returning NO_OP")

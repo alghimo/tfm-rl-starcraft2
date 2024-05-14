@@ -18,7 +18,7 @@ class GameManagerDQNAgent(GameManagerBaseAgent, DQNAgent):
     def _select_game_manager_action(self, obs: TimeStep) -> GameManagerActions:
         return random.choice(self.agent_actions)
 
-    def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
+    def select_action(self, obs: TimeStep, valid_actions = None) -> Tuple[AllActions, Dict[str, Any]]:
         # available_actions = self.available_actions(obs)
         # self.logger.debug(f"Available actions: {available_actions}")
         # available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
@@ -26,6 +26,9 @@ class GameManagerDQNAgent(GameManagerBaseAgent, DQNAgent):
         #     available_actions = [a for a in available_actions if a != AllActions.NO_OP]
         # One-hot encoded version of available actions
         # valid_actions = self._actions_to_network(available_actions)
+
+        if valid_actions is not None:
+            valid_actions = self._actions_to_network(valid_actions)
         if (self._random_mode) or (self._train and (self._buffer.burn_in_capacity < 1)):
             if not self._status_flags["burnin_started"]:
                 self.logger.info(f"Starting burn-in")
@@ -34,18 +37,18 @@ class GameManagerDQNAgent(GameManagerBaseAgent, DQNAgent):
                 self.logger.debug(f"Random mode - collecting experience from random actions")
             else:
                 self.logger.debug(f"Burn in capacity: {100 * self._buffer.burn_in_capacity:.2f}%")
-            raw_action = self.main_network.get_random_action()
+            raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
             # raw_action = self.main_network.get_random_action()
         elif self.is_training:
             if not self._status_flags["train_started"]:
                 self.logger.info(f"Starting training")
                 self._status_flags["train_started"] = True
-            raw_action = self.main_network.get_action(self._current_state, epsilon=self.epsilon)
+            raw_action = self.main_network.get_action(self._current_state_tensor, epsilon=self.epsilon, valid_actions=valid_actions)
         else:
             if not self._status_flags["exploit_started"]:
                 self.logger.info(f"Starting exploit")
                 self._status_flags["exploit_started"] = True
-            raw_action = self.main_network.get_greedy_action(self._current_state)
+            raw_action = self.main_network.get_greedy_action(self._current_state_tensor, valid_actions=valid_actions)
 
         # Convert the "raw" action to a the right type of action
         action = self._idx_to_action[raw_action]

@@ -88,20 +88,20 @@ class DQNAgent(BaseAgent):
             self._target_network_path = self.checkpoint_path / self._TARGET_NETWORK_FILE
 
     @classmethod
-    def _extract_init_arguments(cls, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
-        parent_attrs = super()._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
+    def _extract_init_arguments(cls, checkpoint_path: Path, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
+        parent_attrs = super()._extract_init_arguments(checkpoint_path=checkpoint_path, agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
+        main_network_path = checkpoint_path / cls._MAIN_NETWORK_FILE
+        target_network_path = checkpoint_path / cls._TARGET_NETWORK_FILE
         return dict(
             **parent_attrs,
-            main_network=torch.load(agent_attrs["main_network_path"]),
-            target_network=torch.load(agent_attrs["target_network_path"]),
+            main_network=torch.load(main_network_path),
+            target_network=torch.load(target_network_path),
             random_mode=agent_attrs.get("random_mode", agent_attrs.get("random_model", False)),
             hyperparams=agent_attrs["hyperparams"]
         )
 
     def _load_agent_attrs(self, agent_attrs: Dict):
         super()._load_agent_attrs(agent_attrs)
-        self._main_network_path = agent_attrs["main_network_path"]
-        self._target_network_path = agent_attrs["target_network_path"]
         self.initial_epsilon = agent_attrs["initial_epsilon"]
         self._num_actions = agent_attrs["num_actions"]
         self.loss = agent_attrs["loss"]
@@ -114,8 +114,6 @@ class DQNAgent(BaseAgent):
             hyperparams=self.hyperparams,
             initial_epsilon=self.initial_epsilon,
             epsilon=self.epsilon,
-            main_network_path=self._main_network_path,
-            target_network_path=self._target_network_path,
             num_actions=self._num_actions,
             loss=self.loss,
             random_mode=self._random_mode,
@@ -172,13 +170,14 @@ class DQNAgent(BaseAgent):
                 self._status_flags["burnin_started"] = True
             else:
                 self.logger.debug(f"Burn in capacity: {100 * self._buffer.burn_in_capacity:.2f}%")
+
             raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
             # raw_action = self.main_network.get_random_action()
         elif self.is_training:
             if not self._status_flags["train_started"]:
                 self.logger.info(f"Starting training")
                 self._status_flags["train_started"] = True
-            raw_action = self.main_network.get_action(self._current_state, epsilon=self.epsilon, valid_actions=valid_actions)
+            raw_action = self.main_network.get_action(self._current_state_tensor, epsilon=self.epsilon, valid_actions=valid_actions)
             # raw_action = self.main_network.get_action(self.__current_state, epsilon=self.epsilon)
         else:
             if not self._status_flags["exploit_started"]:
@@ -191,7 +190,7 @@ class DQNAgent(BaseAgent):
             # One-hot encoded version of available actions
             # When exploiting, do not use the invalid action masking
             # raw_action = self.main_network.get_greedy_action(self.__current_state)
-            raw_action = self.main_network.get_greedy_action(self._current_state, valid_actions=valid_actions)
+            raw_action = self.main_network.get_greedy_action(self._current_state_tensor, valid_actions=valid_actions)
 
         # Convert the "raw" action to a the right type of action
         action = self._idx_to_action[raw_action]
@@ -312,10 +311,9 @@ class DQNAgent(BaseAgent):
 
         loss = self._calculate_loss(batch)# Get batch loss
         loss.backward() # Backward pass to get gradients
+        self.main_network.optimizer.step()
         if hasattr(self.main_network, "scheduler") and (self.main_network.scheduler is not None):
             self.main_network.scheduler.step() # Apply the gradients to the main network
-        else:
-            self.main_network.optimizer.step() # Apply the gradients to the main network
 
         if self.device == 'cuda':
             loss = loss.detach().cpu().numpy()

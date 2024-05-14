@@ -26,8 +26,8 @@ class EpisodeStats:
     episode: int = 0
     loss: float = 0.
 
-    invalid_action_counts: Dict[str, int] = field(default_factory=lambda: {a.name: 0 for a in list(AllActions)})
-    valid_action_counts: Dict[str, int] = field(default_factory=lambda: {a.name: 0 for a in list(AllActions)})
+    invalid_action_counts: Dict[str, int] = field(default_factory=lambda: {})
+    valid_action_counts: Dict[str, int] = field(default_factory=lambda: {})
 
     @property
     def mean_loss(self) -> float:
@@ -36,9 +36,11 @@ class EpisodeStats:
         return np.inf
 
     def add_invalid_action(self, action: AllActions):
+        self.invalid_action_counts.setdefault(action.name, 0)
         self.invalid_action_counts[action.name] += 1
 
     def add_valid_action(self, action: AllActions):
+        self.valid_action_counts.setdefault(action.name, 0)
         self.valid_action_counts[action.name] += 1
 
 @dataclass
@@ -51,8 +53,8 @@ class AgentStats:
     total_adjusted_reward: int = 0
     total_score: int = 0
     total_emissions: float = 0.
-    invalid_action_counts: Dict[str, int] = field(default_factory=lambda: {a.name: 0 for a in list(AllActions)})
-    valid_action_counts: Dict[str, int] = field(default_factory=lambda: {a.name: 0 for a in list(AllActions)})
+    invalid_action_counts: Dict[str, int] = field(default_factory=lambda: {})
+    valid_action_counts: Dict[str, int] = field(default_factory=lambda: {})
 
     step_count_per_stage: Dict[str, int] = field(default_factory=lambda: {s.name: 0 for s in list(AgentStage)})
     episode_count_per_stage: Dict[str, int] = field(default_factory=lambda: {s.name: 0 for s in list(AgentStage)})
@@ -69,21 +71,27 @@ class AgentStats:
         self.total_adjusted_reward += episode_stats.adjusted_reward
         self.total_score += episode_stats.score
         for a, c in episode_stats.invalid_action_counts.items():
+            self.invalid_action_counts.setdefault(a, 0)
             self.invalid_action_counts[a] += c
 
         for a, c in episode_stats.valid_action_counts.items():
+            self.valid_action_counts.setdefault(a, 0)
             self.valid_action_counts[a] += c
 
         stage = episode_stats.initial_stage
 
+        self.step_count_per_stage[stage] += episode_stats.steps
+        self.episode_count_per_stage[stage] += 1
         self.total_emissions_per_stage[stage] += episode_stats.emissions
         self.total_reward_per_stage[stage] += episode_stats.reward
         self.total_adjusted_reward_per_stage[stage] += episode_stats.adjusted_reward
         self.total_score_per_stage[stage] += episode_stats.score
         for a, c in episode_stats.invalid_action_counts.items():
+            self.invalid_action_counts_per_stage[stage].setdefault(a, 0)
             self.invalid_action_counts_per_stage[stage][a] += c
 
         for a, c in episode_stats.valid_action_counts.items():
+            self.valid_action_counts_per_stage[stage].setdefault(a, 0)
             self.valid_action_counts_per_stage[stage][a] += c
 
 
@@ -173,9 +181,11 @@ class AggregatedEpisodeStats:
             self.max_score = episode_stats.score
 
         for a, c in episode_stats.invalid_action_counts.items():
+            self.invalid_action_counts.setdefault(a, 0)
             self.invalid_action_counts[a] += c
 
         for a, c in episode_stats.valid_action_counts.items():
+            self.valid_action_counts.setdefault(a, 0)
             self.valid_action_counts[a] += c
 
         stage = episode_stats.initial_stage
@@ -198,7 +208,9 @@ class AggregatedEpisodeStats:
             self.max_score_per_stage[stage] = episode_stats.score
 
         for a, c in episode_stats.invalid_action_counts.items():
+            self.invalid_action_counts_per_stage[stage].setdefault(a, 0)
             self.invalid_action_counts_per_stage[stage][a] += c
 
         for a, c in episode_stats.valid_action_counts.items():
+            self.valid_action_counts_per_stage[stage].setdefault(a, 0)
             self.valid_action_counts_per_stage[stage][a] += c

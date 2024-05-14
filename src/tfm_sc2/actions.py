@@ -45,6 +45,9 @@ class BaseManagerActions(IntEnum):
 
 class ArmyRecruitManagerActions(IntEnum):
     NO_OP          = AllActions.NO_OP
+    HARVEST_MINERALS     = AllActions.HARVEST_MINERALS
+    RECRUIT_SCV          = AllActions.RECRUIT_SCV
+    BUILD_SUPPLY_DEPOT   = AllActions.BUILD_SUPPLY_DEPOT
     RECRUIT_MARINE = AllActions.RECRUIT_MARINE
     # RECRUIT_DOCTOR = AllActions.RECRUIT_DOCTOR
     # BUILD_TECH_LAB = AllActions.BUILD_TECH_LAB
