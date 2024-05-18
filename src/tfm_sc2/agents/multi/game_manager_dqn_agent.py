@@ -19,14 +19,6 @@ class GameManagerDQNAgent(GameManagerBaseAgent, DQNAgent):
         return random.choice(self.agent_actions)
 
     def select_action(self, obs: TimeStep, valid_actions = None) -> Tuple[AllActions, Dict[str, Any]]:
-        # available_actions = self.available_actions(obs)
-        # self.logger.debug(f"Available actions: {available_actions}")
-        # available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
-        # if len(available_actions) > 1 and AllActions.NO_OP in available_actions:
-        #     available_actions = [a for a in available_actions if a != AllActions.NO_OP]
-        # One-hot encoded version of available actions
-        # valid_actions = self._actions_to_network(available_actions)
-
         if valid_actions is not None:
             valid_actions = self._actions_to_network(valid_actions)
         if (self._random_mode) or (self._train and (self._buffer.burn_in_capacity < 1)):

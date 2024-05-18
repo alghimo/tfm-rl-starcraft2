@@ -9,18 +9,15 @@ export AGENT_ALGORITHM="dqn"
 export REWARD_METHOD="score"
 export MEMORY_SIZE=10000
 export BURN_IN=1000
-MODELS_DIR="${BASE_MODELS_DIR}/03"
+MODELS_DIR="${BASE_MODELS_DIR}/05"
 
 # Base Manager
 export AGENT_SUBTYPE="base_manager"
 export BASE_MODEL_ID=multi_dqn_${AGENT_SUBTYPE}
 export MAP=CollectMineralsAndGas
 export TRAIN_EPISODES=100
-export EPSILON_DECAY=0.98 # 300 EP
+export EPSILON_DECAY=0.98
 export LEARNING_RATE_MILESTONES="40 70 90"
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
-# export TRAIN_EPISODES=100
-# export EPSILON_DECAY=0.98 # 300 EP
 export LOG_SUFFIX="_01"
 export LEARNING_RATE_MILESTONES="40 70 90"
 export LEARNING_RATE=0.001
@@ -55,9 +52,6 @@ touch ${BASE_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
 export AGENT_SUBTYPE="army_recruit_manager"
 export BASE_MODEL_ID=multi_dqn_${AGENT_SUBTYPE}
 export MAP=BuildMarines
-# export TRAIN_EPISODES=300
-# export EPSILON_DECAY=0.993 # 300 EP
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
 export TRAIN_EPISODES=50
 export EPSILON_DECAY=0.96 # 300 EP
 export LOG_SUFFIX="_01"
@@ -94,9 +88,6 @@ touch ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
 export AGENT_SUBTYPE="army_attack_manager"
 export BASE_MODEL_ID=multi_dqn_${AGENT_SUBTYPE}
 export MAP=DefeatZerglingsAndBanelings
-# export TRAIN_EPISODES=300
-# export EPSILON_DECAY=0.993 # 300 EP
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
 export TRAIN_EPISODES=150
 export EPSILON_DECAY=0.985 # 300 EP
 export LOG_SUFFIX="_01"
@@ -133,13 +124,13 @@ touch ${ARMY_ATTACK_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
 export AGENT_SUBTYPE="game_manager"
 export BASE_MODEL_ID=multi_dqn_${AGENT_SUBTYPE}
 export MAP=Simple64
-# export TRAIN_EPISODES=300
-# export EPSILON_DECAY=0.993 # 300 EP
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
-export TRAIN_EPISODES=100
-export EPSILON_DECAY=0.98 # 300 EP
+# export TRAIN_EPISODES=100
+# export EPSILON_DECAY=0.98
+# export LEARNING_RATE_MILESTONES="40 70 90"
+export TRAIN_EPISODES=50
+export EPSILON_DECAY=0.96
+export LEARNING_RATE_MILESTONES="30 40 47"
 export LOG_SUFFIX="_01"
-export LEARNING_RATE_MILESTONES="40 70 90"
 export LEARNING_RATE=0.001
 export GAME_MANAGER_DQN_SIZE="small" # extra_small, small, medium, large, extra_large
 

@@ -9,7 +9,7 @@ export AGENT_ALGORITHM="dqn"
 export REWARD_METHOD="reward"
 export MEMORY_SIZE=10000
 export BURN_IN=1000
-MODELS_DIR="${BASE_MODELS_DIR}/03"
+MODELS_DIR="${BASE_MODELS_DIR}/05"
 
 # Base Manager
 export AGENT_SUBTYPE="base_manager"
@@ -18,9 +18,6 @@ export MAP=CollectMineralsAndGas
 export TRAIN_EPISODES=100
 export EPSILON_DECAY=0.98 # 300 EP
 export LEARNING_RATE_MILESTONES="40 70 90"
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
-# export TRAIN_EPISODES=100
-# export EPSILON_DECAY=0.98 # 300 EP
 export LOG_SUFFIX="_01"
 export LEARNING_RATE_MILESTONES="40 70 90"
 export LEARNING_RATE=0.001
@@ -33,31 +30,28 @@ BASE_MANAGER_MODEL_DIR="${MODELS_DIR}/${MODEL_ID}"
 mkdir -p ${BASE_MANAGER_MODEL_DIR}
 
 echo "Training Base Manager on ${MAP}"
-# touch ${BASE_MANAGER_MODEL_DIR}/_01_training_start_${TRAIN_EPISODES}_ep
+touch ${BASE_MANAGER_MODEL_DIR}/_01_training_start_${TRAIN_EPISODES}_ep
 
-# python ${PYTHON_SCRIPTS_DIR}/runner.py \
-#     --agent_key "${AGENT_KEY}" \
-#     --map_name "${MAP}" \
-#     --num_episodes ${TRAIN_EPISODES} \
-#     --log_file ${BASE_MANAGER_MODEL_DIR}/training${LOG_SUFFIX}.log \
-#     --model_id ${MODEL_ID} \
-#     --models_path ${MODELS_DIR} \
-#     --epsilon_decay ${EPSILON_DECAY} \
-#     --lr_milestones ${LEARNING_RATE_MILESTONES} \
-#     --lr ${LEARNING_RATE} \
-#     --dqn_size ${BASE_MANAGER_DQN_SIZE} \
-#     --memory_size ${MEMORY_SIZE} \
-#     --burn_in ${BURN_IN} \
-#     --reward_method ${REWARD_METHOD} 2>&1 | tee ${BASE_MANAGER_MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
-# touch ${BASE_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
+python ${PYTHON_SCRIPTS_DIR}/runner.py \
+    --agent_key "${AGENT_KEY}" \
+    --map_name "${MAP}" \
+    --num_episodes ${TRAIN_EPISODES} \
+    --log_file ${BASE_MANAGER_MODEL_DIR}/training${LOG_SUFFIX}.log \
+    --model_id ${MODEL_ID} \
+    --models_path ${MODELS_DIR} \
+    --epsilon_decay ${EPSILON_DECAY} \
+    --lr_milestones ${LEARNING_RATE_MILESTONES} \
+    --lr ${LEARNING_RATE} \
+    --dqn_size ${BASE_MANAGER_DQN_SIZE} \
+    --memory_size ${MEMORY_SIZE} \
+    --burn_in ${BURN_IN} \
+    --reward_method ${REWARD_METHOD} 2>&1 | tee ${BASE_MANAGER_MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
+touch ${BASE_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
 
 # Army Recruit Manager
 export AGENT_SUBTYPE="army_recruit_manager"
 export BASE_MODEL_ID=multi_dqn_${AGENT_SUBTYPE}
 export MAP=BuildMarines
-# export TRAIN_EPISODES=300
-# export EPSILON_DECAY=0.993 # 300 EP
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
 export TRAIN_EPISODES=50
 export EPSILON_DECAY=0.96 # 300 EP
 export LOG_SUFFIX="_01"
@@ -72,31 +66,28 @@ ARMY_RECRUIT_MANAGER_MODEL_DIR="${MODELS_DIR}/${MODEL_ID}"
 mkdir -p ${ARMY_RECRUIT_MANAGER_MODEL_DIR}
 
 echo "Training Army Recruit Manager on ${MAP}"
-# touch ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/_01_training_start_${TRAIN_EPISODES}_ep
+touch ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/_01_training_start_${TRAIN_EPISODES}_ep
 
-# python ${PYTHON_SCRIPTS_DIR}/runner.py \
-#     --agent_key "${AGENT_KEY}" \
-#     --map_name "${MAP}" \
-#     --num_episodes ${TRAIN_EPISODES} \
-#     --log_file ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/training${LOG_SUFFIX}.log \
-#     --model_id ${MODEL_ID} \
-#     --models_path ${MODELS_DIR} \
-#     --epsilon_decay ${EPSILON_DECAY} \
-#     --lr_milestones ${LEARNING_RATE_MILESTONES} \
-#     --lr ${LEARNING_RATE} \
-#     --dqn_size ${ARMY_RECRUIT_MANAGER_DQN_SIZE} \
-#     --memory_size ${MEMORY_SIZE} \
-#     --burn_in ${BURN_IN} \
-#     --reward_method ${REWARD_METHOD} 2>&1 | tee ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
-# touch ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
+python ${PYTHON_SCRIPTS_DIR}/runner.py \
+    --agent_key "${AGENT_KEY}" \
+    --map_name "${MAP}" \
+    --num_episodes ${TRAIN_EPISODES} \
+    --log_file ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/training${LOG_SUFFIX}.log \
+    --model_id ${MODEL_ID} \
+    --models_path ${MODELS_DIR} \
+    --epsilon_decay ${EPSILON_DECAY} \
+    --lr_milestones ${LEARNING_RATE_MILESTONES} \
+    --lr ${LEARNING_RATE} \
+    --dqn_size ${ARMY_RECRUIT_MANAGER_DQN_SIZE} \
+    --memory_size ${MEMORY_SIZE} \
+    --burn_in ${BURN_IN} \
+    --reward_method ${REWARD_METHOD} 2>&1 | tee ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
+touch ${ARMY_RECRUIT_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
 
 # Army Attack Manager
 export AGENT_SUBTYPE="army_attack_manager"
 export BASE_MODEL_ID=multi_dqn_${AGENT_SUBTYPE}
 export MAP=DefeatZerglingsAndBanelings
-# export TRAIN_EPISODES=300
-# export EPSILON_DECAY=0.993 # 300 EP
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
 export TRAIN_EPISODES=150
 export EPSILON_DECAY=0.985 # 300 EP
 export LOG_SUFFIX="_01"
@@ -111,31 +102,28 @@ ARMY_ATTACK_MANAGER_MODEL_DIR="${MODELS_DIR}/${MODEL_ID}"
 mkdir -p ${ARMY_ATTACK_MANAGER_MODEL_DIR}
 
 echo "Training Army Attack Manager on ${MAP}"
-# touch ${ARMY_ATTACK_MANAGER_MODEL_DIR}/_01_training_start_${TRAIN_EPISODES}_ep
+touch ${ARMY_ATTACK_MANAGER_MODEL_DIR}/_01_training_start_${TRAIN_EPISODES}_ep
 
-# python ${PYTHON_SCRIPTS_DIR}/runner.py \
-#     --agent_key "${AGENT_KEY}" \
-#     --map_name "${MAP}" \
-#     --num_episodes ${TRAIN_EPISODES} \
-#     --log_file ${ARMY_ATTACK_MANAGER_MODEL_DIR}/training${LOG_SUFFIX}.log \
-#     --model_id ${MODEL_ID} \
-#     --models_path ${MODELS_DIR} \
-#     --epsilon_decay ${EPSILON_DECAY} \
-#     --lr_milestones ${LEARNING_RATE_MILESTONES} \
-#     --lr ${LEARNING_RATE} \
-#     --dqn_size ${ARMY_ATTACK_MANAGER_DQN_SIZE} \
-#     --memory_size ${MEMORY_SIZE} \
-#     --burn_in ${BURN_IN} \
-#     --reward_method ${REWARD_METHOD} 2>&1 | tee ${ARMY_ATTACK_MANAGER_MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
-# touch ${ARMY_ATTACK_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
+python ${PYTHON_SCRIPTS_DIR}/runner.py \
+    --agent_key "${AGENT_KEY}" \
+    --map_name "${MAP}" \
+    --num_episodes ${TRAIN_EPISODES} \
+    --log_file ${ARMY_ATTACK_MANAGER_MODEL_DIR}/training${LOG_SUFFIX}.log \
+    --model_id ${MODEL_ID} \
+    --models_path ${MODELS_DIR} \
+    --epsilon_decay ${EPSILON_DECAY} \
+    --lr_milestones ${LEARNING_RATE_MILESTONES} \
+    --lr ${LEARNING_RATE} \
+    --dqn_size ${ARMY_ATTACK_MANAGER_DQN_SIZE} \
+    --memory_size ${MEMORY_SIZE} \
+    --burn_in ${BURN_IN} \
+    --reward_method ${REWARD_METHOD} 2>&1 | tee ${ARMY_ATTACK_MANAGER_MODEL_DIR}/${MAP}${LOG_SUFFIX}.log
+touch ${ARMY_ATTACK_MANAGER_MODEL_DIR}/_02_training_done_${TRAIN_EPISODES}_ep
 
 # Game Manager
 export AGENT_SUBTYPE="game_manager"
 export BASE_MODEL_ID=multi_dqn_${AGENT_SUBTYPE}
 export MAP=Simple64
-# export TRAIN_EPISODES=300
-# export EPSILON_DECAY=0.993 # 300 EP
-# export LEARNING_RATE_MILESTONES="50 100 200 270"
 export TRAIN_EPISODES=100
 export EPSILON_DECAY=0.98 # 300 EP
 export LOG_SUFFIX="_01"

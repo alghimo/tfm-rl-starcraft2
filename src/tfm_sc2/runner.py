@@ -142,7 +142,7 @@ def load_or_create_dqn_agent(cls, map_name, map_config, load_agent: bool, checkp
         agent = create_dqn_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path, main_network=main_network, buffer=buffer, log_name=log_name, exploit=exploit, reward_method=reward_method, **extra_agent_args)
     else:
         # HEre we allow buffer to be None. In that case, the agent's buffer is loaded, otherwise it will be replaced
-        agent = load_dqn_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer, **extra_agent_args)
+        agent = load_dqn_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer,  **extra_agent_args)
         if FLAGS.reset_epsilon:
             agent.epsilon = agent.initial_epsilon
 
@@ -164,7 +164,7 @@ def create_random_agent(cls, map_name, map_config, checkpoint_path: Path, log_na
 
 def load_or_create_random_agent(cls, map_name, map_config, load_agent: bool, checkpoint_path: Path, log_name: str, reward_method: RewardMethod, memory_size: int = 100000, burn_in: int = 10000, buffer: ExperienceReplayBuffer = None, **extra_agent_args):
     if load_agent:
-        agent = load_random_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path, buffer=buffer, **extra_agent_args)
+        agent = load_random_agent(cls=cls, map_name=map_name, map_config=map_config, checkpoint_path=checkpoint_path, buffer=buffer,  **extra_agent_args)
     else:
         if buffer is None:
             buffer = ExperienceReplayBuffer(memory_size=memory_size, burn_in=burn_in)
@@ -271,39 +271,43 @@ def main(unused_argv):
         with open(buffer_file, mode="rb") as f:
             buffer = pickle.load(f)
 
+    base_args = dict(map_name=map_name, map_config=map_config, reward_method=reward_method)
+    common_args = dict(buffer=buffer, checkpoint_path=checkpoint_path, load_agent=load_agent,  **base_args)
+    dqn_agent_args = dict(exploit=exploit, load_networks_only=load_networks_only, **common_args)
+    subagent_args = dict(buffer=None, exploit=True, load_networks_only=False, **base_args)
     match FLAGS.agent_key:
         case "single.random":
-            agent = load_or_create_random_agent(cls=SingleRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=checkpoint_path, reward_method=reward_method, log_name="Main Agent - Random")
+            agent = load_or_create_random_agent(cls=SingleRandomAgent, **common_args, log_name="Main Agent - Random")
         case "single.dqn":
-            agent = load_or_create_dqn_agent(SingleDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer, load_networks_only=load_networks_only, reward_method=reward_method, log_name="Main Agent - SingleDQN")
+            agent = load_or_create_dqn_agent(SingleDQNAgent, **dqn_agent_args, log_name="Main Agent - SingleDQN")
         case "multi.random.base_manager":
-            agent = load_or_create_random_agent(BaseManagerRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=checkpoint_path, reward_method=reward_method, log_name="Main Agent - Random BaseManager")
+            agent = load_or_create_random_agent(BaseManagerRandomAgent, **common_args, log_name="Main Agent - Random BaseManager")
         case "multi.random.army_recruit_manager":
-            agent = load_or_create_random_agent(ArmyRecruitManagerRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=checkpoint_path, reward_method=reward_method, log_name="Main Agent - Random ArmyRecruitManager")
+            agent = load_or_create_random_agent(ArmyRecruitManagerRandomAgent, **common_args, log_name="Main Agent - Random ArmyRecruitManager")
         case "multi.random.army_attack_manager":
-            agent = load_or_create_random_agent(ArmyAttackManagerRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=checkpoint_path, reward_method=reward_method, log_name="Main Agent - Random ArmyAttackManager")
+            agent = load_or_create_random_agent(ArmyAttackManagerRandomAgent, **common_args, log_name="Main Agent - Random ArmyAttackManager")
         case "multi.random.game_manager":
             bm_path = checkpoint_path / "base_manager"
             arm_path = checkpoint_path / "army_recruit_manager"
             aam_path = checkpoint_path / "army_attack_manager"
-            base_manager = load_or_create_random_agent(BaseManagerRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=bm_path, reward_method=reward_method, log_name="SubAgent - Random BaseManager")
+            base_manager = load_or_create_random_agent(BaseManagerRandomAgent, **common_args, checkpoint_path=bm_path, log_name="SubAgent - Random BaseManager")
             base_manager.logger.setLevel(logging.WARNING)
-            army_recruit_manager = load_or_create_random_agent(ArmyRecruitManagerRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=arm_path, reward_method=reward_method, log_name="SubAgent - Random ArmyRecruitManager")
+            army_recruit_manager = load_or_create_random_agent(ArmyRecruitManagerRandomAgent, **common_args, checkpoint_path=arm_path, log_name="SubAgent - Random ArmyRecruitManager")
             army_recruit_manager.logger.setLevel(logging.WARNING)
-            army_attack_manager = load_or_create_random_agent(ArmyAttackManagerRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=aam_path, reward_method=reward_method, log_name="SubAgent - Random ArmyAttackManager")
+            army_attack_manager = load_or_create_random_agent(ArmyAttackManagerRandomAgent, **common_args, checkpoint_path=aam_path, log_name="SubAgent - Random ArmyAttackManager")
             army_attack_manager.logger.setLevel(logging.WARNING)
             extra_agent_args = dict(
                 base_manager=base_manager,
                 army_recruit_manager=army_recruit_manager,
                 army_attack_manager=army_attack_manager
             )
-            agent = load_or_create_random_agent(GameManagerRandomAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, buffer=buffer, checkpoint_path=checkpoint_path, reward_method=reward_method, log_name="Main Agent - Random GameManager", **extra_agent_args)
+            agent = load_or_create_random_agent(GameManagerRandomAgent, **common_args, log_name="Main Agent - Random GameManager", **extra_agent_args)
         case "multi.dqn.base_manager":
-            agent = load_or_create_dqn_agent(BaseManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer, load_networks_only=load_networks_only, reward_method=reward_method, log_name="Main Agent - Base Manager")
+            agent = load_or_create_dqn_agent(BaseManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Base Manager")
         case "multi.dqn.army_recruit_manager":
-            agent = load_or_create_dqn_agent(ArmyRecruitManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer, load_networks_only=load_networks_only, reward_method=reward_method, log_name="Main Agent - Army Manager")
+            agent = load_or_create_dqn_agent(ArmyRecruitManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Army Manager")
         case "multi.dqn.army_attack_manager":
-            agent = load_or_create_dqn_agent(ArmyAttackManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer, load_networks_only=load_networks_only, reward_method=reward_method, log_name="Main Agent - Attack Manager")
+            agent = load_or_create_dqn_agent(ArmyAttackManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Attack Manager")
         case "multi.dqn.game_manager":
             bm_path = checkpoint_path / "base_manager"
             bm_agent_file = bm_path / "agent.pkl"
@@ -315,18 +319,18 @@ def main(unused_argv):
             # assert arm_agent_file.exists(), f"The agent file for the army recruit manager doesn't exist '{arm_agent_file}'"
             # assert aam_agent_file.exists(), f"The agent file for the attack manager doesn't exist '{arm_agent_file}'"
             logger.info("Loading base manager")
-            base_manager = load_or_create_dqn_agent(BaseManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=bm_agent_file.exists(), checkpoint_path=bm_path, exploit=True, buffer=None, load_networks_only=False, reward_method=reward_method, log_name="Sub Agent - Base Manager")
+            base_manager = load_or_create_dqn_agent(BaseManagerDQNAgent, **subagent_args, load_agent=bm_agent_file.exists(), checkpoint_path=bm_path, log_name="Sub Agent - Base Manager")
             logger.info("Loading army recruit manager")
-            army_recruit_manager = load_or_create_dqn_agent(ArmyRecruitManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=arm_agent_file.exists(), checkpoint_path=arm_path, exploit=True, buffer=None, load_networks_only=False, reward_method=reward_method, log_name="Sub Agent - Army Manager")
+            army_recruit_manager = load_or_create_dqn_agent(ArmyRecruitManagerDQNAgent, **subagent_args, load_agent=arm_agent_file.exists(), checkpoint_path=arm_path, log_name="Sub Agent - Army Manager")
             logger.info("Loading attack manager")
-            army_attack_manager = load_or_create_dqn_agent(ArmyAttackManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=aam_agent_file.exists(), checkpoint_path=aam_path, exploit=True, buffer=None, load_networks_only=False, reward_method=reward_method, log_name="Sub Agent - Attack Manager")
+            army_attack_manager = load_or_create_dqn_agent(ArmyAttackManagerDQNAgent, **subagent_args, load_agent=aam_agent_file.exists(), checkpoint_path=aam_path, log_name="Sub Agent - Attack Manager")
             extra_agent_args = dict(
                 base_manager=base_manager,
                 army_recruit_manager=army_recruit_manager,
                 army_attack_manager=army_attack_manager
             )
 
-            agent = load_or_create_dqn_agent(GameManagerDQNAgent, map_name=map_name, map_config=map_config, load_agent=load_agent, checkpoint_path=checkpoint_path, exploit=exploit, buffer=buffer, load_networks_only=load_networks_only, reward_method=reward_method, log_name="Main Agent - Game Manager", **extra_agent_args)
+            agent = load_or_create_dqn_agent(GameManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Game Manager", **extra_agent_args)
         case _:
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:

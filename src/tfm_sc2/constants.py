@@ -29,7 +29,7 @@ class SC2Costs:
     MARINE         = Cost(minerals=50, supply=1)
 
 class Constants:
-    STEP_REWARD = -0.01
+    STEP_REWARD = -0.1
     INVALID_ACTION_REWARD = -1.
     NO_OP_REWARD = -1.
     COMMAND_CENTER_QUEUE_LENGTH = 5

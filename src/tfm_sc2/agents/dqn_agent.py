@@ -88,8 +88,8 @@ class DQNAgent(BaseAgent):
             self._target_network_path = self.checkpoint_path / self._TARGET_NETWORK_FILE
 
     @classmethod
-    def _extract_init_arguments(cls, checkpoint_path: Path, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
-        parent_attrs = super()._extract_init_arguments(checkpoint_path=checkpoint_path, agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
+    def _extract_init_arguments(cls, checkpoint_path: Path, agent_attrs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        parent_attrs = super()._extract_init_arguments(checkpoint_path=checkpoint_path, agent_attrs=agent_attrs, **kwargs)
         main_network_path = checkpoint_path / cls._MAIN_NETWORK_FILE
         target_network_path = checkpoint_path / cls._TARGET_NETWORK_FILE
         return dict(
@@ -153,11 +153,8 @@ class DQNAgent(BaseAgent):
 
 
     def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
-        # available_actions = self.available_actions(obs)
-        # self.logger.debug(f"Available actions: {available_actions}")
         available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
-        # if len(available_actions) > 1 and AllActions.NO_OP in available_actions:
-        #     available_actions = [a for a in available_actions if a != AllActions.NO_OP]
+
         # One-hot encoded version of available actions
         valid_actions = self._actions_to_network(available_actions)
         if not any(valid_actions):
@@ -172,24 +169,16 @@ class DQNAgent(BaseAgent):
                 self.logger.debug(f"Burn in capacity: {100 * self._buffer.burn_in_capacity:.2f}%")
 
             raw_action = self.main_network.get_random_action(valid_actions=valid_actions)
-            # raw_action = self.main_network.get_random_action()
         elif self.is_training:
             if not self._status_flags["train_started"]:
                 self.logger.info(f"Starting training")
                 self._status_flags["train_started"] = True
             raw_action = self.main_network.get_action(self._current_state_tensor, epsilon=self.epsilon, valid_actions=valid_actions)
-            # raw_action = self.main_network.get_action(self.__current_state, epsilon=self.epsilon)
         else:
             if not self._status_flags["exploit_started"]:
                 self.logger.info(f"Starting exploit")
                 self._status_flags["exploit_started"] = True
 
-            available_actions = self.available_actions(obs)
-            valid_actions = self._actions_to_network(available_actions)
-            # available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
-            # One-hot encoded version of available actions
-            # When exploiting, do not use the invalid action masking
-            # raw_action = self.main_network.get_greedy_action(self.__current_state)
             raw_action = self.main_network.get_greedy_action(self._current_state_tensor, valid_actions=valid_actions)
 
         # Convert the "raw" action to a the right type of action
@@ -204,7 +193,6 @@ class DQNAgent(BaseAgent):
         if not obs.first():
             # do updates
             done = obs.last()
-            # self._buffer.append(self._prev_state, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self._current_state)
 
             if (not self._is_burnin) and self.is_training:
                 main_net_updated = False
