@@ -9,7 +9,7 @@ from ...actions import (
     ArmyAttackManagerActions,
     ArmyRecruitManagerActions,
     BaseManagerActions,
-    ResourceManagerActions,
+    # ResourceManagerActions,
 )
 from ...constants import Constants
 from ..dqn_agent import DQNAgent
@@ -26,7 +26,7 @@ class SingleDQNAgent(DQNAgent):
         # self.__agent_actions = list(AllActions)
         self.__agent_actions = list(
             set(
-                list(ResourceManagerActions) +
+                # list(ResourceManagerActions) +
                 list(BaseManagerActions) +
                 list(ArmyRecruitManagerActions) +
                 list(ArmyAttackManagerActions)

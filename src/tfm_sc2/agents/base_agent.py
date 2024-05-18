@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import torch
 from codecarbon.emissions_tracker import BaseEmissionsTracker
 from pysc2.agents import base_agent
 from pysc2.env.environment import TimeStep
@@ -19,39 +20,39 @@ from typing_extensions import Self
 
 from ..actions import AllActions
 from ..constants import Constants, SC2Costs
-from ..types import Gas, Minerals, Position
+from ..networks.experience_replay_buffer import ExperienceReplayBuffer
+from ..types import AgentStage, Gas, Minerals, Position, RewardMethod, State
 from ..with_logger import WithLogger
-
-# from ..with_tracker import WithTracker
 from .stats import AgentStats, AggregatedEpisodeStats, EpisodeStats
-
-# from .agent_utils import AgentUtils
 
 
 class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     _AGENT_FILE: str = "agent.pkl"
+    _BUFFER_FILE: str = "buffer.pkl"
     _STATS_FILE: str =  "stats.parquet"
 
     _action_to_game = {
         AllActions.NO_OP: actions.RAW_FUNCTIONS.no_op,
         AllActions.HARVEST_MINERALS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
-        # AllActions.COLLECT_GAS: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Harvest_Gather_unit("now", source_unit_tag, target_unit_tag),
-        # AllActions.BUILD_REFINERY: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Build_Refinery_pt("now", source_unit_tag, target_unit_tag),
         AllActions.RECRUIT_SCV: lambda source_unit_tag: actions.RAW_FUNCTIONS.Train_SCV_quick("now", source_unit_tag),
         AllActions.BUILD_SUPPLY_DEPOT: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_SupplyDepot_pt("now", source_unit_tag, target_position),
         AllActions.BUILD_COMMAND_CENTER: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_CommandCenter_pt("now", source_unit_tag, target_position),
         AllActions.BUILD_BARRACKS: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Build_Barracks_pt("now", source_unit_tag, target_position),
         AllActions.RECRUIT_MARINE: lambda source_unit_tag: actions.RAW_FUNCTIONS.Train_Marine_quick("now", source_unit_tag),
         AllActions.ATTACK_WITH_SINGLE_UNIT: lambda source_unit_tag, target_position: actions.RAW_FUNCTIONS.Attack_pt("now", source_unit_tag, target_position),
-        # AllActions.ATTACK_WITH_SINGLE_UNIT: lambda source_unit_tag, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tag, target_unit_tag),
-        # AllActions.ATTACK_WITH_SQUAD_5: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
-        # AllActions.ATTACK_WITH_SQUAD_10: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
-        # AllActions.ATTACK_WITH_SQUAD_15: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag),
-        # AllActions.ATTACK_WITH_FULL_ARMY: lambda source_unit_tags, target_unit_tag: actions.RAW_FUNCTIONS.Attack_unit("now", source_unit_tags, target_unit_tag)
     }
 
-    def __init__(self, map_name: str, map_config: Dict, train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10, **kwargs):
+    def __init__(self,
+                 map_name: str, map_config: Dict, buffer: ExperienceReplayBuffer = None,
+                 train: bool = True, checkpoint_path: Union[str|Path] = None, tracker_update_freq_seconds: int = 10,
+                 reward_method: RewardMethod = RewardMethod.REWARD, **kwargs):
         super().__init__(**kwargs)
+
+        if torch.cuda.is_available():
+            self.device = 'cuda'
+        else:
+            self.device = 'cpu'
+
         self._map_name = map_name
         self._map_config = map_config
         self._supply_depot_positions = None
@@ -68,17 +69,37 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._tracker: BaseEmissionsTracker = None
         self._tracker_update_freq_seconds = tracker_update_freq_seconds
         self._tracker_last_update = time.time()
+        self._prev_action = None
+        self._prev_action_args = None
+        self._prev_action_is_valid = None
+        self._prev_score = 0.
+        self._current_score = 0.
+        self._current_reward = 0.
+        self._current_adjusted_reward = 0.
+        self._reward_method = reward_method
+        self._buffer = buffer
+        self._current_state_tensor = None
+        self._current_state_tuple = None
+        self._prev_state_tensor = None
+        self._prev_state_tuple = None
+
+        self._action_to_idx = None
+        self._idx_to_action = None
+        self._num_actions = None
+        self._best_mean_rewards = None
 
         if checkpoint_path is not None:
             self._checkpoint_path = Path(checkpoint_path)
             self._checkpoint_path.mkdir(exist_ok=True, parents=True)
             self._agent_path = self._checkpoint_path / self._AGENT_FILE
+            self._buffer_path = self._checkpoint_path / self._BUFFER_FILE
             self._stats_path = self._checkpoint_path / self._STATS_FILE
         else:
             self._checkpoint_path = None
             self._main_network_path = None
             self._target_network_path = None
             self._agent_path = None
+            self._buffer_path = None
             self._stats_path = None
 
         self._status_flags = dict(
@@ -87,6 +108,15 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         )
 
         self.initialize()
+
+    @property
+    def _collect_stats(self) -> bool:
+        return True
+
+    def setup_actions(self):
+        self._idx_to_action = { idx: action for idx, action in enumerate(self.agent_actions) }
+        self._action_to_idx = { action: idx for idx, action in enumerate(self.agent_actions) }
+        self._num_actions = len(self.agent_actions)
 
     def initialize(self):
         self._current_episode_stats = EpisodeStats(map_name=self._map_name)
@@ -119,9 +149,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
     def _update_checkpoint_paths(self):
         if self.checkpoint_path is None:
             self._agent_path = None
+            self._buffer_path = None
             self._stats_path = None
         else:
             self._agent_path = self.checkpoint_path / self._AGENT_FILE
+            self._buffer_path = self.checkpoint_path / self._BUFFER_FILE
             self._stats_path = self.checkpoint_path / self._STATS_FILE
 
     def save(self, checkpoint_path: Union[str|Path] = None):
@@ -134,18 +166,31 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
 
         with open(self._agent_path, "wb") as f:
             pickle.dump(agent_attrs, f)
+            self.logger.info(f"Saved agent attributes to {self._agent_path}")
 
         self.save_stats(self.checkpoint_path)
 
+        if self._buffer is not None:
+            with open(self._buffer_path, "wb") as f:
+                pickle.dump(self._buffer, f)
+                self.logger.info(f"Saved memory replay buffer to {self._buffer_path}")
+
     @classmethod
-    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict) -> Self:
+    def load(cls, checkpoint_path: Union[str|Path], map_name: str, map_config: Dict, buffer: ExperienceReplayBuffer = None, **kwargs) -> Self:
         checkpoint_path = Path(checkpoint_path)
         agent_attrs_file = checkpoint_path / cls._AGENT_FILE
         with open(agent_attrs_file, mode="rb") as f:
             agent_attrs = pickle.load(f)
+        if "main_network_path" in agent_attrs:
+            agent_attrs["main_network_path"] = checkpoint_path / cls._MAIN_NETWORK_FILE
+        if "target_network_path" in agent_attrs:
+            agent_attrs["target_network_path"] = checkpoint_path / cls._TARGET_NETWORK_FILE
 
-        init_attrs = cls._extract_init_arguments(agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
-        agent = cls(**init_attrs)
+        if buffer is not None:
+            agent_attrs["buffer"] = buffer
+
+        init_attrs = cls._extract_init_arguments(checkpoint_path=checkpoint_path, agent_attrs=agent_attrs, map_name=map_name, map_config=map_config)
+        agent = cls(**init_attrs, **kwargs)
         agent._load_agent_attrs(agent_attrs)
 
         if agent._current_episode_stats is None or agent._current_episode_stats.map_name != map_name:
@@ -165,10 +210,16 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         elif self.checkpoint_path is None:
             raise RuntimeError(f"The agent's checkpoint path is None, and no checkpoint path was provided to 'save'. Please provide one of the two.")
 
+        def _add_dummy_action(stats, count_cols):
+            for count_col in count_cols:
+                stats[count_col] = stats[count_col].apply(lambda d: dict(dummy=0) if len(d) == 0 else d)
+            return stats
+
         try:
             all_episode_stats = [v for v in self._episode_stats.values()]
             all_episode_stats = reduce(lambda v1, v2: v1 + v2, all_episode_stats)
             episode_stats_pd = pd.DataFrame(data=all_episode_stats)
+            episode_stats_pd = _add_dummy_action(episode_stats_pd, ["invalid_action_counts", "valid_action_counts"])
             episode_stats_pd.to_parquet(self._checkpoint_path / "episode_stats.parquet")
             self.logger.info(f"Saved episode stats")
         except Exception as error:
@@ -178,6 +229,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         try:
             all_agent_stats = [v for v in self._agent_stats.values()]
             agent_stats_pd = pd.DataFrame(data=all_agent_stats)
+            agent_stats_pd = _add_dummy_action(
+                agent_stats_pd,
+                ["invalid_action_counts", "valid_action_counts", "invalid_action_counts_per_stage", "valid_action_counts_per_stage"])
             agent_stats_pd.to_parquet(self._checkpoint_path / "agent_stats.parquet")
             self.logger.info(f"Saved agent stats")
         except Exception as error:
@@ -187,6 +241,9 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         try:
             all_aggregated_stats = [v for v in self._aggregated_episode_stats.values()]
             aggregated_stats_pd = pd.DataFrame(data=all_aggregated_stats)
+            aggregated_stats_pd = _add_dummy_action(
+                aggregated_stats_pd,
+                ["invalid_action_counts", "valid_action_counts", "invalid_action_counts_per_stage", "valid_action_counts_per_stage"])
             aggregated_stats_pd.to_parquet(self._checkpoint_path / "aggregated_stats.parquet")
             self.logger.info(f"Saved aggregated stats")
         except Exception as error:
@@ -194,20 +251,20 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             self.logger.exception(error)
 
     @classmethod
-    def _extract_init_arguments(cls, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
+    def _extract_init_arguments(cls, checkpoint_path: Path, agent_attrs: Dict[str, Any], map_name: str, map_config: Dict) -> Dict[str, Any]:
         return dict(
+            checkpoint_path=checkpoint_path,
             map_name=map_name,
             map_config=map_config,
             train=agent_attrs["train"],
-            log_name=agent_attrs["log_name"]
+            log_name=agent_attrs["log_name"],
+            buffer=agent_attrs["buffer"],
         )
 
     def _load_agent_attrs(self, agent_attrs: Dict):
         self._train = agent_attrs["train"]
         self._exploit = agent_attrs.get("exploit", not self._train)
         self.checkpoint_path = agent_attrs["checkpoint_path"]
-        self._agent_path = agent_attrs["agent_path"]
-        self._stats_path = agent_attrs["stats_path"]
         self._agent_stats = agent_attrs["agent_stats"]
         self._episode_stats = agent_attrs["episode_stats"]
         self._aggregated_episode_stats = agent_attrs["aggregated_episode_stats"]
@@ -217,6 +274,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self.steps = agent_attrs["steps"]
         self.obs_spec = agent_attrs["obs_spec"]
         self.action_spec = agent_attrs["action_spec"]
+        self._reward_method = agent_attrs.get("reward_method", RewardMethod.REWARD)
         # From WithLogger
         self._log_name = agent_attrs["log_name"]
         if self.logger.name != self._log_name:
@@ -227,6 +285,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             train=self._train,
             exploit=self._exploit,
             checkpoint_path=self.checkpoint_path,
+            buffer=self._buffer,
             agent_path=self._agent_path,
             stats_path=self._stats_path,
             agent_stats=self._agent_stats,
@@ -238,6 +297,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             steps=self.steps,
             obs_spec=self.obs_spec,
             action_spec=self.action_spec,
+            reward_method=self._reward_method,
             # From logger
             log_name=self._log_name,
         )
@@ -252,6 +312,13 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._train = False
         self._exploit = True
 
+    def _current_agent_stage(self):
+        if self._exploit:
+            return AgentStage.EXPLOIT
+        if self.is_training:
+            return AgentStage.TRAINING
+        return AgentStage.UNKNOWN
+
     def reset(self, **kwargs):
         super().reset(**kwargs)
         self._supply_depot_positions = None
@@ -263,9 +330,22 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self._attempted_supply_depot_positions = None
         self._attempted_command_center_positions = None
         self._attempted_barrack_positions = None
+        self._prev_action = None
+        self._prev_action_args = None
+        self._prev_action_is_valid = None
+        self._prev_score = 0.
+        self._current_score = 0.
+        self._current_reward = 0.
+        self._current_adjusted_reward = 0.
+        self._prev_state_tensor = None
+        self._prev_state_tuple = None
+        self._current_state_tensor = None
+        self._current_state_tuple = None
 
-        self._current_episode_stats = EpisodeStats(map_name=self._map_name, is_training=self.is_training, is_exploit=self._exploit)
+        current_stage = self._current_agent_stage().name
+        self._current_episode_stats = EpisodeStats(map_name=self._map_name, is_burnin=False, is_training=self.is_training, is_exploit=self._exploit, episode=self.current_agent_stats.episode_count, initial_stage=current_stage)
         self.current_agent_stats.episode_count += 1
+        self.current_agent_stats.episode_count_per_stage[current_stage] += 1
 
     @property
     def is_training(self):
@@ -328,29 +408,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     worker = random.choice(idle_workers)
                     command_center, _ = self.get_closest(command_centers, Position(worker.x, worker.y))
                     mineral, _ = self.get_closest(minerals, Position(command_center.x, command_center.y))
-                    # closest_worker, closest_mineral = self.select_closest_worker(obs, idle_workers, command_centers, minerals)
                     action_args = dict(source_unit_tag=worker.tag, target_unit_tag=mineral.tag)
-                # case AllActions.BUILD_REFINERY:
-                #     geysers = [unit for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
-                #     command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
-                #     workers = self.get_idle_workers(obs)
-                #     if len(workers) == 0:
-                #         workers = self.get_harvester_workers(obs)
-
-                #     if len(command_centers) == 0:
-                #         # Only takes into account distance between workers and geysers
-                #         closest_worker, closest_geyser = self.select_closest_worker_to_resource(obs, workers, geysers)
-                #     else:
-                #         # Takes into account the distance from the worker to the command center and from the command center to the geyser
-                #         closest_worker, closest_geyser = self.select_closest_worker(obs, workers, command_centers, geysers)
-                #     action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_geyser.tag)
-                # case AllActions.COLLECT_GAS:
-                #     refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
-                #     command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
-                #     idle_workers = self.get_idle_workers(obs)
-
-                #     closest_worker, closest_refinery = self.select_closest_worker(obs, idle_workers, command_centers, refineries)
-                #     action_args = dict(source_unit_tag=closest_worker.tag, target_unit_tag=closest_refinery.tag)
                 case AllActions.RECRUIT_SCV:
                     command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
                     command_centers = [cc for cc in command_centers if cc.order_length < Constants.COMMAND_CENTER_QUEUE_LENGTH]
@@ -405,61 +463,35 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                     target_position = Position(closest_enemy.x, closest_enemy.y)
                     marine_tag = random.choice(idle_marines).tag
                     action_args = dict(source_unit_tag=marine_tag, target_position=target_position)
-                # case AllActions.ATTACK_WITH_SINGLE_UNIT:
-                #     idle_marines = self.get_idle_marines(obs)
-                #     enemies = self.get_enemy_units(obs)
-                #     marine_tag = random.choice(idle_marines).tag
-                #     enemy_tag = random.choice(enemies).tag
-                #     action_args = dict(source_unit_tag=marine_tag, target_unit_tag=enemy_tag)
-                # case AllActions.ATTACK_WITH_SQUAD_5:
-                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                #     enemies = self.get_enemy_units(obs)
-                #     enemy_tag = random.choice(enemies).tag
-                #     marine_tags = random.sample(idle_marines, k=5)
-                #     action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
-                # case AllActions.ATTACK_WITH_SQUAD_10:
-                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                #     enemies = self.get_enemy_units(obs)
-                #     enemy_tag = random.choice(enemies).tag
-                #     marine_tags = random.sample(idle_marines, k=10)
-                #     action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
-                # case AllActions.ATTACK_WITH_SQUAD_15:
-                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                #     enemies = self.get_enemy_units(obs)
-                #     enemy_tag = random.choice(enemies).tag
-                #     marine_tags = random.sample(idle_marines, k=15)
-                #     action_args = dict(source_unit_tags=marine_tags, target_unit_tag=enemy_tag)
-                # case AllActions.ATTACK_WITH_FULL_ARMY:
-                #     idle_marines = [m.tag for m in self.get_idle_marines(obs)]
-                #     assert len(idle_marines) > 0, "Can't attack with no units"
-                #     enemies = self.get_enemy_units(obs)
-                #     enemy_tag = random.choice(enemies).tag
-                #     action_args = dict(source_unit_tags=idle_marines, target_unit_tag=enemy_tag)
                 case _:
-                    raise RuntimeError(f"Missing logic to select action args for action {action}")
+                    raise RuntimeError(f"Missing logic to select action args for action {action.name}")
 
             return action_args, True
         except AssertionError as error:
-            self.logger.warning(error)
+            self.logger.debug(error)
             return None, False
 
     def get_next_command_center_position(self, obs: TimeStep) -> Position:
         next_pos = None
+        command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+        command_centers_positions = [Position(cc.x, cc.y) for cc in command_centers]
+
+        enemy_command_centers = self.get_enemy_units(obs, unit_types=Constants.COMMAND_CENTER_UNIT_TYPES)
+        enemy_command_centers_positions = [Position(cc.x, cc.y) for cc in enemy_command_centers]
+        all_cc_positions = command_centers_positions + enemy_command_centers_positions
         for idx, candidate_position in enumerate(self._command_center_positions):
-            if candidate_position not in self._used_command_center_positions:
+            if (candidate_position not in self._used_command_center_positions) and (candidate_position not in all_cc_positions):
                 next_pos = candidate_position
                 break
-
-        # if next_pos is not None:
-        #     # put all positions before the candidate position at the end
-        #     self._command_center_positions = self._command_center_positions[idx + 1:] + self._command_center_positions[:idx+1]
 
         return next_pos
 
     def update_command_center_positions(self, obs: TimeStep) -> Position:
         command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
         command_center_positions = [Position(cc.x, cc.y) for cc in command_centers]
-        self._used_command_center_positions = command_center_positions
+        enemy_command_centers = self.get_enemy_units(obs, unit_types=Constants.COMMAND_CENTER_UNIT_TYPES)
+        enemy_command_center_positions = [Position(cc.x, cc.y) for cc in enemy_command_centers]
+        self._used_command_center_positions = command_center_positions + enemy_command_center_positions
         # self._command_center_positions = [pos for pos in self._command_center_positions if pos not in command_center_positions]
 
     def use_command_center_position(self, obs: TimeStep, position: Position) -> Position:
@@ -478,17 +510,12 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 next_pos = candidate_position
                 break
 
-        # if next_pos is not None:
-        #     # put all positions before the candidate position at the end
-        #     self._supply_depot_positions = self._supply_depot_positions[idx + 1:] + self._supply_depot_positions[:idx+1]
-
         return next_pos
 
     def update_supply_depot_positions(self, obs: TimeStep) -> Position:
         supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
         supply_depots_positions = [Position(sd.x, sd.y) for sd in supply_depots]
         self._used_supply_depot_positions = supply_depots_positions
-        # self._supply_depot_positions = [pos for pos in self._supply_depot_positions if pos not in supply_depots_positions]
 
     def use_supply_depot_position(self, obs: TimeStep, position: Position) -> Position:
         if position not in self._supply_depot_positions:
@@ -505,9 +532,6 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             if candidate_position not in self._used_barrack_positions:
                 next_pos = candidate_position
                 break
-        # if next_pos is not None:
-        #     # put all positions before the candidate position at the end
-        #     self._barrack_positions = self._barrack_positions[idx + 1:] + self._barrack_positions[:idx+1]
 
         return next_pos
 
@@ -524,52 +548,188 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
         barrack_positions = [Position(b.x, b.y) for b in barracks]
         self._used_barrack_positions = barrack_positions
-        # self._barrack_positions = [pos for pos in self._barrack_positions if pos not in barrack_positions]
+
+    def get_reward_and_score(self, obs: TimeStep) -> Tuple[float, float, float]:
+        reward = obs.reward
+
+        get_score = getattr(self, self._map_config["get_score_method"])
+        score = get_score(obs)
+        adjusted_reward = reward + Constants.STEP_REWARD
+
+        if not (obs.last() or obs.first()):
+            if self._prev_action_is_valid == False:
+                adjusted_reward = Constants.INVALID_ACTION_REWARD
+            elif self._prev_action == AllActions.NO_OP:
+                adjusted_reward = Constants.NO_OP_REWARD
+
+        self._current_score = score
+        self._current_reward = reward
+        self._current_adjusted_reward = adjusted_reward
+
+        return reward, adjusted_reward, score
+
+    def get_army_health_difference(self, obs: TimeStep) -> float:
+        enemy_army = self.get_enemy_units(obs, unit_types=Constants.ARMY_UNIT_TYPES)
+        enemy_total_army_health = sum(map(lambda b: b.health, enemy_army))
+        marines = self.get_self_units(obs, unit_types=units.Terran.Marine)
+        total_army_health = sum(map(lambda b: b.health, marines))
+
+        return total_army_health - enemy_total_army_health
+
+    def get_mineral_collection_rate_difference(self, obs: TimeStep) -> float:
+        return obs.observation.score_cumulative.collection_rate_minerals / 60
+
+    def get_num_marines_difference(self, obs: TimeStep) -> float:
+        if not obs.first():
+            prev_num_marines = self._prev_state_tuple.num_marines
+        else:
+            prev_num_marines = 0
+
+        marines = self.get_self_units(obs, unit_types=units.Terran.Marine)
+        num_marines = len(marines)
+
+        return num_marines - prev_num_marines + Constants.STEP_REWARD
+
+    def get_reward_as_score(self, obs: TimeStep) -> float:
+        return obs.reward
+
+    def _convert_obs_to_state(self, obs: TimeStep) -> torch.Tensor:
+        actions_state = self._get_actions_state(obs)
+        building_state = self._get_buildings_state(obs)
+        worker_state = self._get_workers_state(obs)
+        army_state = self._get_army_state(obs)
+        resources_state = self._get_resources_state(obs)
+        scores_state = self._get_scores_state(obs)
+        neutral_units_state = self._get_neutral_units_state(obs)
+        enemy_state = self._get_enemy_state(obs)
+        # Enemy
+
+        state_tuple = State(
+            **actions_state,
+			**building_state,
+			**worker_state,
+			**army_state,
+			**resources_state,
+            **scores_state,
+            **neutral_units_state,
+            **enemy_state
+        )
+        return torch.Tensor(state_tuple).to(device=self.device), state_tuple
+
+    def _actions_to_network(self, actions: List[AllActions], as_tensor: bool = True) -> List[np.int8]:
+        """Converts a list of AllAction elements to a one-hot encoded version that the network can use.
+
+        Args:
+            actions (List[AllActions]): List of actions
+
+        Returns:
+            List[bool]: One-hot encoded version of the actions provided.
+        """
+        ohe_actions = np.zeros(self._num_actions, dtype=np.int8)
+
+        for action in actions:
+            action_idx = self._action_to_idx[action]
+            ohe_actions[action_idx] = 1
+
+        if not as_tensor:
+            return ohe_actions
+        return torch.Tensor(ohe_actions).to(device=self.device)
 
     def pre_step(self, obs: TimeStep):
-        self._current_episode_stats.reward += obs.reward
-        self._current_episode_stats.score = obs.observation.score_cumulative.score
-        self._current_episode_stats.steps += 1
-        self.current_agent_stats.step_count += 1
+        self._current_state_tensor, self._current_state_tuple = self._convert_obs_to_state(obs)
 
-    def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any]):
-        if obs.last():
-            emissions = self._tracker.flush() if self._tracker is not None else 0.
-            self.logger.info(f"End of episode - Got extra {emissions} since last update")
-            self._current_episode_stats.emissions += emissions
-            self._current_episode_stats.is_training = self.is_training
-            self._current_episode_stats.is_exploit = self._exploit
-            self._tracker_last_update = time.time()
-            self.current_agent_stats.process_episode(self._current_episode_stats)
-            self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
-            self._episode_stats[self._map_name].append(self._current_episode_stats)
-            log_msg_parts = self._get_end_of_episode_info_components()
-            log_msg = " :: ".join(log_msg_parts)
-            self.logger.info(log_msg)
-        else:
-            now = time.time()
-            if (self._tracker is not None) and (now - self._tracker_last_update > self._tracker_update_freq_seconds):
-                emissions = self._tracker.flush()
-                self.logger.info(f"Tracker flush - Got extra {emissions} since last update")
+        if not self._exploit:
+            reward, adjusted_reward, score = self.get_reward_and_score(obs)
+            self._current_episode_stats.reward += reward
+            self._current_episode_stats.adjusted_reward += adjusted_reward
+            self._current_episode_stats.score += score
+            self._current_episode_stats.steps += 1
+            self.current_agent_stats.step_count += 1
+
+        if obs.first():
+            self.setup_actions()
+        elif not self._exploit:
+            done = obs.last()
+            if self._buffer is not None:
+                self._buffer.append(self._prev_state_tensor, self._prev_action, self._prev_action_args, self._current_reward, self._current_adjusted_reward, self._current_score, done, self._current_state_tensor)
+
+    def post_step(self, obs: TimeStep, action: AllActions, action_args: Dict[str, Any], original_action: AllActions, original_action_args: Dict[str, Any], is_valid_action: bool):
+        self._prev_score = obs.observation.score_cumulative.score
+        self._prev_state_tensor = self._current_state_tensor
+        self._prev_state_tuple = self._current_state_tuple
+        self._prev_action = self._action_to_idx[original_action]
+        self._prev_action_args = original_action_args
+
+        if not self._exploit:
+            if obs.last():
+                emissions = self._tracker.flush() if self._tracker is not None else 0.
+                self.logger.debug(f"End of episode - Got extra {emissions} since last update")
                 self._current_episode_stats.emissions += emissions
-                self._tracker_last_update = now
+                self._current_episode_stats.is_training = self.is_training
+                self._current_episode_stats.is_exploit = self._exploit
+                self._current_episode_stats.final_stage = self._current_agent_stage().name
+                self._tracker_last_update = time.time()
+                episode_stage = self._current_episode_stats.initial_stage
+                mean_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, reward_method=self._reward_method)
+                max_mean_rewards = self._best_mean_rewards
+                max_mean_rewards_str = f"{max_mean_rewards:.2f}" if max_mean_rewards is not None else "None"
+                new_max_mean_rewards = (max_mean_rewards is None) or (mean_rewards >= max_mean_rewards)
+
+                if (self.is_training) and (self.checkpoint_path is not None) and new_max_mean_rewards:
+                    self.logger.info(f"New max reward during training ({max_mean_rewards_str} -> {mean_rewards:.2f}). Saving best agent...")
+                    checkpoint_path = self.checkpoint_path
+                    save_path = self.checkpoint_path / "best_agent"
+                    save_path.mkdir(exist_ok=True, parents=True)
+                    self.save(checkpoint_path=save_path)
+                    self.checkpoint_path = checkpoint_path
+                    self._best_mean_rewards = mean_rewards
+
+                self.current_agent_stats.process_episode(self._current_episode_stats)
+                self.current_aggregated_episode_stats.process_episode(self._current_episode_stats)
+                self._episode_stats[self._map_name].append(self._current_episode_stats)
+                log_msg_parts = ["\n=================", "================="] + self._get_end_of_episode_info_components() + ["=================", "================="]
+                log_msg = "\n".join(log_msg_parts)
+                self.logger.info(log_msg)
+            else:
+                now = time.time()
+                if (self._tracker is not None) and (now - self._tracker_last_update > self._tracker_update_freq_seconds):
+                    emissions = self._tracker.flush() or 0.
+                    self.logger.debug(f"Tracker flush - Got extra {emissions} since last update")
+                    self._current_episode_stats.emissions += emissions
+                    self._tracker_last_update = now
 
     def _get_end_of_episode_info_components(self) -> List[str]:
+        num_invalid = sum(self._current_episode_stats.invalid_action_counts.values())
+        num_valid = sum(self._current_episode_stats.valid_action_counts.values())
+        pct_invalid = num_invalid / (num_invalid + num_valid)
+        episode_stage = self._current_episode_stats.initial_stage
+        mean_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, reward_method=RewardMethod.REWARD)
+        mean_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, last_n=10, reward_method=RewardMethod.REWARD)
+        mean_adjusted_rewards = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, reward_method=RewardMethod.ADJUSTED_REWARD)
+        mean_adjusted_rewards_10 = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, last_n=10, reward_method=RewardMethod.ADJUSTED_REWARD)
+        mean_scores = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, reward_method=RewardMethod.SCORE)
+        mean_scores_10 = self.current_aggregated_episode_stats.mean_rewards(stage=episode_stage, last_n=10, reward_method=RewardMethod.SCORE)
+        episode_count = self.current_agent_stats.episode_count_per_stage[episode_stage]
         return [
-            f"Episode {self.current_agent_stats.episode_count}",
-            f"Mean Rewards ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_rewards:.2f}",
-            f"Mean Rewards (10ep) {self.current_aggregated_episode_stats.mean_rewards_last_n_episodes(n=10):.2f}",
-            f"Mean Score ({self.current_agent_stats.episode_count} ep) {self.current_aggregated_episode_stats.mean_score:.2f}",
-            f"Mean Score (10ep) {self.current_aggregated_episode_stats.mean_score_last_n_episodes(n=10):.2f}",
-            f"Max reward {self.current_aggregated_episode_stats.max_reward:.2f}",
-            f"Max score {self.current_aggregated_episode_stats.max_score:.2f}",
-            f"Episode steps: {self._current_episode_stats.steps}",
-            f"Total steps: {self.current_agent_stats.step_count}",
-            f"Episode emissions: {self._current_episode_stats.emissions}",
-            f"Total emissions: {self.current_agent_stats.total_emissions}",
+            f"Episode {self._map_name} // Stage: {episode_stage} // Final stage: {self._current_agent_stage().name}",
+            f"Reward method: {self._reward_method.name}",
+            f"Reward: {self._current_episode_stats.reward} // Score: {self._current_episode_stats.score}",
+            f"Episode {episode_count}",
+            f"Mean Rewards for stage ({episode_count} ep) {mean_rewards:.2f} / (10ep) {mean_rewards_10:.2f}",
+            f"Mean Adjusted Rewards for stage ({episode_count} ep) {mean_adjusted_rewards:.2f} / (10ep) {mean_adjusted_rewards_10:.2f}",
+            f"Mean Scores ({episode_count} ep) {mean_scores:.2f} / (10ep) {mean_scores_10:.2f}",
+            f"Episode steps: {self._current_episode_stats.steps} / Total steps: {self.current_agent_stats.step_count_per_stage[episode_stage]}",
+            f"Invalid actions: {num_invalid}/{num_valid + num_invalid} ({100 * pct_invalid:.2f}%)",
+            f"Max reward {self.current_aggregated_episode_stats.max_reward_per_stage[episode_stage]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_reward})",
+            f"Max adjusted reward {self.current_aggregated_episode_stats.max_adjusted_reward_per_stage[episode_stage]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_adjusted_reward})",
+            f"Max score {self.current_aggregated_episode_stats.max_score_per_stage[episode_stage]:.2f} (absolute max: {self.current_aggregated_episode_stats.max_score})",
+            f"Episode emissions: {self._current_episode_stats.emissions} / Total in stage: {self.current_agent_stats.total_emissions_per_stage[episode_stage]} / Total: {self.current_agent_stats.total_emissions}",
         ]
 
-    def step(self, obs: TimeStep) -> AllActions:
+    def step(self, obs: TimeStep, only_super_step: bool = False) -> AllActions:
+        if only_super_step:
+            super().step(obs)
+            return
         if obs.first():
             self._setup_positions(obs)
         self.pre_step(obs)
@@ -581,9 +741,12 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         self.update_barracks_positions(obs)
 
         action, action_args, is_valid_action = self.select_action(obs)
+        original_action = action
+        original_action_args = action_args
 
         if not is_valid_action:
-            self.logger.info(f"Action {action.name} is not valid anymore, returning NO_OP")
+            self.logger.debug(f"Action {action.name} is not valid anymore, returning NO_OP")
+            self._current_episode_stats.add_invalid_action(action)
             action = AllActions.NO_OP
             action_args = None
         elif action == AllActions.BUILD_BARRACKS:
@@ -594,10 +757,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             self.use_command_center_position(obs, action_args["target_position"])
 
         if is_valid_action:
+            self._current_episode_stats.add_valid_action(action)
             self.logger.debug(f"[Step {self.steps}] Performing action {action.name} with args: {action_args}")
         game_action = self._action_to_game[action]
 
-        self.post_step(obs, action, action_args)
+        self.post_step(obs, action, action_args, original_action, original_action_args, is_valid_action)
 
         if action_args is not None:
             return game_action(**action_args)
@@ -644,13 +808,11 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         if action == AllActions.NO_OP:
             return True
         if action not in self.agent_actions:
-            self.logger.warning(f"Tried to validate action {action} that is not available for this agent. Allowed actions: {self.agent_actions}")
             return False
         elif action not in self._map_config["available_actions"]:
-            self.logger.debug(f"Action {action} that is not available for this map.")
             return False
         elif action not in self._action_to_game:
-            self.logger.warning(f"Tried to validate action {action} that is not yet implemented in the action to game mapper: {self._action_to_game.keys()}")
+            self.logger.warning(f"Tried to validate action {action.name} that is not yet implemented in the action to game mapper: {self._action_to_game.keys()}")
             return False
 
         def _has_target_unit_tag(args):
@@ -672,163 +834,46 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         match action, action_args:
             case AllActions.NO_OP, _:
                 return True
-            # case AllActions.HARVEST_MINERALS, args if _has_target_unit_tag(args) and _has_source_unit_tag(args):
-            #     self.logger.debug(f"Checking action {action.name} ({action}) with source and target units")
-            #     command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
-            #     if not any(command_centers):
-            #         self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
-            #         return False
-
-            #     minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type) and unit.x == position.x and unit.y == position.y]
-            #     if not any(minerals):
-            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are no minerals to harvest at position {position}")
-            #         return False
-
-            #     if self.has_idle_workers(obs):
-            #         return True
-            #     # TODO Add check for workers harvesting gas
-
-            #     self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
-            #     return False
             case AllActions.HARVEST_MINERALS, args if _has_target_unit_tag(args):
                 target_unit_tag = args["target_unit_tag"]
-                self.logger.debug(f"Checking action {action.name} ({action}) with position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
                 if not any(command_centers):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
                     return False
 
                 minerals = [unit.tag for unit in obs.observation.raw_units if unit.tag == target_unit_tag and Minerals.contains(unit.unit_type)]
                 if len(minerals) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] There are no minerals to harvest at position {position}")
                     return False
 
                 if self.has_idle_workers(obs):
                     return True
-                # TODO Add check for workers harvesting gas
-
-                self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
                 return False
             case AllActions.HARVEST_MINERALS, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) with no position")
                 command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
 
                 if not any(command_centers):
-                    self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
                     return False
 
                 minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
                 if not any(minerals):
-                    self.logger.debug(f"[Action {action.name} ({action}) without position] There are no minerals on the map")
                     return False
 
                 if self.has_idle_workers(obs):
                     return True
-                # elif self.has_workers(obs):
-                #     return True
-                # TODO Add check for workers harvesting gas
-
-                self.logger.debug(f"[Action {action.name} ({action}) without position] There are minerals available, but the player has no SCVs.")
                 return False
-            # case AllActions.COLLECT_GAS, args if _has_target_unit_tag(args):
-            #     target_unit_tag = args["target_unit_tag"]
-            #     self.logger.debug(f"Checking action {action.name} ({action}) with position")
-            #     command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
-            #     if not any(command_centers):
-            #         self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
-            #         return False
-
-            #     refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich], unit_tags=target_unit_tag)
-
-            #     if len(refineries) == 0:
-            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are no refineries to harvest at position {position}")
-            #         return False
-
-            #     if self.has_idle_workers(obs):
-            #         return True
-            #     # TODO Add check for workers harvesting minerals
-
-            #     self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has minerals, but the player has no SCVs.")
-            #     return False
-            # case AllActions.COLLECT_GAS, _:
-            #     self.logger.debug(f"Checking action {action.name} ({action}) with no position")
-            #     command_centers = [unit.tag for unit in self.get_self_units(obs, unit_types=units.Terran.CommandCenter)]
-            #     if not any(command_centers):
-            #         self.logger.debug(f"[Action {action.name} ({action}) + position] The player has no command centers")
-            #         return False
-
-            #     refineries = self.get_self_units(obs, unit_types=[units.Terran.Refinery, units.Terran.RefineryRich])
-            #     refineries = [unit.tag for unit in refineries]
-            #     if not any(refineries):
-            #         self.logger.debug(f"[Action {action.name} ({action}) without position] There are no refineries on the map")
-            #         return False
-
-            #     if self.has_idle_workers(obs):
-            #         return True
-            #     # elif self.has_workers(obs):
-            #     #     return True
-            #     # TODO Add check for workers harvesting minerals
-
-            #     self.logger.debug(f"[Action {action.name} ({action}) without position] There are refineries, but the player has no workers.")
-            #     return False
-            # TODO Add this check
-            # case AllActions.BUILD_REFINERY, args if _has_source_unit_tag(args) and _has_target_unit_tag(args):
-            # case AllActions.BUILD_REFINERY, args if _has_target_unit_tag(args):
-            #     target_unit_tag = args["target_unit_tag"]
-            #     geysers = [unit.tag for unit in obs.observation.raw_units if unit.tag == target_unit_tag and Gas.contains(unit.unit_type)]
-            #     if not any(geysers):
-            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are no vespene geysers at position {position} (or they already have a structure)")
-            #         return False
-
-            #     if not SC2Costs.REFINERY.can_pay(obs.observation.player):
-            #         self.logger.debug(f"[Action {action.name} ({action}) + position] There are is a vespene geyser at position {position} but the player can't pay the cost ({SC2Costs.REFINERY})")
-            #         return False
-
-            #     if self.has_idle_workers(obs):
-            #         return True
-            #     elif self.has_harvester_workers(obs):
-            #         self.logger.debug(f"[Action {action.name} ({action}) + position] Player has no idle SCVs, but has other available workers harvesting.")
-            #         return True
-
-            #     self.logger.debug(f"[Action {action.name} ({action}) + position] The target position has a vespene geyser and the player can pay the cust, but the player has no SCVs.")
-            #     return False
-            # case AllActions.BUILD_REFINERY, _:
-            #     geysers = [unit.tag for unit in obs.observation.raw_units if Gas.contains(unit.unit_type)]
-            #     if not any(geysers):
-            #         self.logger.debug(f"[Action {action.name} ({action}) without position] There are no vespene geysers on the map(or they already have a structure)")
-            #         return False
-
-            #     if not SC2Costs.REFINERY.can_pay(obs.observation.player):
-            #         self.logger.debug(f"[Action {action.name} ({action}) without position] There are are vespene geysers available but the player can't pay the cost ({SC2Costs.REFINERY})")
-            #         return False
-
-            #     if self.has_idle_workers(obs):
-            #         return True
-            #     elif self.has_workers(obs):
-            #         self.logger.debug(f"[Action {action.name} ({action}) without position] Player has no idle SCVs, but has other available SCVs.")
-            #         return True
-
-            #     self.logger.debug(f"[Action {action.name} ({action}) without position] There are free vespene geysers and the player can pay the cust, but the player has no SCVs.")
-            #     return False
             case AllActions.RECRUIT_SCV, args if _has_source_unit_tag(args):
                 command_center_tag = args["source_unit_tag"]
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter, unit_tags=command_center_tag)
                 command_centers = [cc for cc in command_centers if cc.order_length < Constants.COMMAND_CENTER_QUEUE_LENGTH]
                 if len(command_centers) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
                     return False
                 if command_centers[0].order_length >= Constants.COMMAND_CENTER_QUEUE_LENGTH:
-                    self.logger.debug(f"[Action {action.name} ({action})] The command center has the build queue full")
                     return False
                 if not SC2Costs.SCV.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of an SCV ({SC2Costs.SCV})")
                     return False
                 return True
             case AllActions.RECRUIT_SCV, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) with no command center tag")
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
                 if len(command_centers) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has no command centers")
                     return False
 
                 for command_center in command_centers:
@@ -837,138 +882,81 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             case AllActions.BUILD_SUPPLY_DEPOT, _:
                 target_position = self.get_next_supply_depot_position(obs)
                 if target_position is None:
-                    self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build a supply depot")
                     return False
                 if not self.has_idle_workers(obs):
                     if not self.has_harvester_workers(obs):
-                        self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers or workers that are harvesting.")
                         return False
-                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers, but has workers that are harvesting.")
                 if not SC2Costs.SUPPLY_DEPOT.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Supply Depot ({SC2Costs.SUPPLY_DEPOT})")
                     return False
 
                 return True
             case AllActions.BUILD_COMMAND_CENTER, _:
                 target_position = self.get_next_command_center_position(obs)
                 if target_position is None:
-                    self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build a command center")
                     return False
+                command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+                command_centers_positions = [Position(cc.x, cc.y) for cc in command_centers]
+                if target_position in command_centers_positions:
+                    return False
+
+                enemy_command_centers = self.get_enemy_units(obs, unit_types=Constants.COMMAND_CENTER_UNIT_TYPES)
+                enemy_command_centers_positions = [Position(cc.x, cc.y) for cc in enemy_command_centers]
+                if target_position in enemy_command_centers_positions:
+                    return False
+
                 if not self.has_idle_workers(obs):
                     if not self.has_harvester_workers(obs):
-                        self.logger.debug(f"[Action {action.name} ({action})] Player has no idle or harvester workers.")
                         return False
-                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers, but has workers that are harvesting.")
 
                 if not SC2Costs.COMMAND_CENTER.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Command Center ({SC2Costs.COMMAND_CENTER})")
                     return False
 
                 return True
             case AllActions.BUILD_BARRACKS, _:
                 target_position = self.get_next_barracks_position(obs)
                 if target_position is None:
-                    self.logger.debug(f"[Action {action.name} ({action})] There are no free positions to build barracks")
                     return False
                 if not self.has_idle_workers(obs):
                     if not self.has_harvester_workers(obs):
-                        self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers or workers that are harvesting.")
                         return False
-                    self.logger.debug(f"[Action {action.name} ({action})] Player has no idle workers, but has workers that are harvesting.")
+                supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
+                if len(supply_depots) == 0:
+                    return False
+
                 if not SC2Costs.BARRACKS.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Barrack ({SC2Costs.BARRACKS})")
                     return False
 
                 return True
             case AllActions.RECRUIT_MARINE, args if _has_source_unit_tag(args):
-                self.logger.debug(f"Checking action {action.name} ({action}) with barracks tag")
                 barracks_tag = args["source_unit_tag"]
                 barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks, unit_tags=barracks_tag)
-                # TODO Review this if we ever add the option to build the reactor (queue size is increased to 8)
                 barracks = [b for b in barracks if b.order_length < Constants.BARRACKS_QUEUE_LENGTH]
                 if len(barracks) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has no barracks with tag {barracks_tag}")
                     return False
 
                 if not SC2Costs.MARINE.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Marine ({SC2Costs.MARINE})")
                     return False
                 return True
 
             case AllActions.RECRUIT_MARINE, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) with no barracks tag")
                 barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
-                # TODO Review this if we ever add the option to build the reactor (queue size is increased to 8)
                 barracks = [b for b in barracks if b.order_length < Constants.BARRACKS_QUEUE_LENGTH]
                 if len(barracks) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has no barracks")
                     return False
 
                 if not SC2Costs.MARINE.can_pay(obs.observation.player):
-                    self.logger.debug(f"[Action {action.name} ({action})] The player can't pay the cost of a Marine ({SC2Costs.MARINE})")
                     return False
 
                 return True
             case AllActions.ATTACK_WITH_SINGLE_UNIT, _:
-                self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
                 idle_marines = self.get_idle_marines(obs)
                 if len(idle_marines) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")
                     return False
                 enemies = self.get_enemy_units(obs)
                 if len(enemies) == 0:
-                    self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
                     return False
 
                 return True
-            # case AllActions.ATTACK_WITH_SQUAD_5, _:
-            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-            #     idle_marines = self.get_idle_marines(obs)
-            #     if len(idle_marines) < 5:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The player has less than 5 idle marines")
-            #         return False
-            #     enemies = self.get_enemy_units(obs)
-            #     if len(enemies) == 0:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-            #         return False
-
-            #     return True
-            # case AllActions.ATTACK_WITH_SQUAD_10, _:
-            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-            #     idle_marines = self.get_idle_marines(obs)
-            #     if len(idle_marines) < 10:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The player has less than 10 idle marines")
-            #         return False
-            #     enemies = self.get_enemy_units(obs)
-            #     if len(enemies) == 0:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-            #         return False
-
-            #     return True
-            # case AllActions.ATTACK_WITH_SQUAD_15, _:
-            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-            #     idle_marines = self.get_idle_marines(obs)
-            #     if len(idle_marines) < 15:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The player has less than 15 idle marines")
-            #         return False
-            #     enemies = self.get_enemy_units(obs)
-            #     if len(enemies) == 0:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-            #         return False
-
-            #     return True
-            # case AllActions.ATTACK_WITH_FULL_ARMY, _:
-            #     self.logger.debug(f"Checking action {action.name} ({action}) without source or target unit tags")
-            #     idle_marines = self.get_idle_marines(obs)
-            #     if len(idle_marines) == 0:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The player has no idle marines")
-            #         return False
-            #     enemies = self.get_enemy_units(obs)
-            #     if len(enemies) == 0:
-            #         self.logger.debug(f"[Action {action.name} ({action})] The are no enemies to attack")
-            #         return False
-
-            #     return True
             case _:
                 self.logger.warning(f"Action {action.name} ({action}) is not implemented yet")
                 return False
@@ -1164,3 +1152,132 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
                 target_resource = command_center_closest_resource[closest_command_center.tag]
 
         return closest_worker, target_resource
+
+
+    def _get_buildings_state(self, obs):
+        def _num_complete(buildings):
+            return len(list(filter(self.is_complete, buildings)))
+        # info about command centers
+        command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter)
+        num_command_centers = len(command_centers)
+        num_completed_command_centers = _num_complete(command_centers)
+        command_centers_state = dict(
+            num_command_centers=num_command_centers,
+            num_completed_command_centers=num_completed_command_centers
+        )
+
+        for idx in range(3):
+            if idx >= num_command_centers:
+                order_length = -1
+                assigned_harvesters = -1
+            else:
+                cc = command_centers[idx]
+                order_length = cc.order_length
+                assigned_harvesters = cc.assigned_harvesters
+
+            command_centers_state[f"command_center_{idx}_order_length"] = order_length
+            command_centers_state[f"command_center_{idx}_num_workers"] = assigned_harvesters
+
+        # Buildings
+        supply_depots = self.get_self_units(obs, unit_types=units.Terran.SupplyDepot)
+        num_supply_depots = len(supply_depots)
+        barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+        num_barracks = len(barracks)
+
+        buildings_state = dict(
+			# Supply Depots
+			num_supply_depots=num_supply_depots,
+			num_completed_supply_depots=_num_complete(supply_depots),
+			# Barracks
+			num_barracks=num_barracks,
+			num_completed_barracks=_num_complete(barracks),
+        )
+
+        return {
+            **command_centers_state,
+            **buildings_state
+        }
+
+    def _get_workers_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        workers = self.get_workers(obs)
+        num_mineral_harvesters = len([w for w in workers if w.order_id_0 in Constants.HARVEST_ACTIONS])
+        num_workers = len(workers)
+        num_idle_workers = len([w for w in workers if self.is_idle(w)])
+        pct_idle_workers = 0 if num_workers == 0 else num_idle_workers / num_workers
+        pct_mineral_harvesters = 0 if num_workers == 0 else num_mineral_harvesters / num_workers
+
+        # TODO more stats on N workers (e.g. distance to command centers, distance to minerals, to geysers...)
+        return dict(
+            num_workers=num_workers,
+			num_idle_workers=len([w for w in workers if self.is_idle(w)]),
+            pct_idle_workers=pct_idle_workers,
+            num_mineral_harvesters=num_mineral_harvesters,
+            pct_mineral_harvesters=pct_mineral_harvesters,
+        )
+
+    def _get_army_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        marines = self.get_self_units(obs, unit_types=units.Terran.Marine)
+        barracks = self.get_self_units(obs, unit_types=units.Terran.Barracks)
+        num_marines_in_queue = sum(map(lambda b: b.order_length, barracks))
+        num_marines = len(marines)
+        total_army_health = sum(map(lambda b: b.health, marines))
+
+        return dict(
+            num_marines=num_marines,
+            num_marines_in_queue=num_marines_in_queue,
+            total_army_health=total_army_health,
+        )
+
+    def _get_resources_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        return dict(
+            free_supply=self.get_free_supply(obs),
+            minerals=obs.observation.player.minerals,
+            collection_rate_minerals=obs.observation.score_cumulative.collection_rate_minerals/60
+        )
+
+    def _get_scores_state(self, obs: TimeStep)     -> Dict[str, int|float]:
+        return {
+            "score_cumulative_score": obs.observation.score_cumulative.score,
+            "score_cumulative_total_value_units": obs.observation.score_cumulative.total_value_units,
+            "score_cumulative_total_value_structures": obs.observation.score_cumulative.total_value_structures,
+            "score_cumulative_killed_value_units": obs.observation.score_cumulative.killed_value_units,
+            "score_cumulative_killed_value_structures": obs.observation.score_cumulative.killed_value_structures,
+            # Supply (food) scores
+            "score_food_used_none": obs.observation.score_by_category.food_used.none,
+            "score_food_used_army": obs.observation.score_by_category.food_used.army,
+            "score_food_used_economy": obs.observation.score_by_category.food_used.economy,
+            # Used minerals and vespene
+            "score_used_minerals_none": obs.observation.score_by_category.used_minerals.none,
+            "score_used_minerals_army": obs.observation.score_by_category.used_minerals.army,
+            "score_used_minerals_economy": obs.observation.score_by_category.used_minerals.economy,
+            # Score by vital
+            "score_by_vital_total_damage_dealt_life": obs.observation.score_by_vital.total_damage_dealt.life,
+            "score_by_vital_total_damage_taken_life": obs.observation.score_by_vital.total_damage_taken.life,
+        }
+
+    def _get_neutral_units_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        minerals = [unit.tag for unit in obs.observation.raw_units if Minerals.contains(unit.unit_type)]
+        return dict(
+            num_minerals=len(minerals),
+        )
+
+    def _get_enemy_state(self, obs: TimeStep) -> Dict[str, int|float]:
+        enemy_buildings = self.get_enemy_units(obs, unit_types=Constants.BUILDING_UNIT_TYPES)
+        enemy_army = self.get_enemy_units(obs, unit_types=Constants.ARMY_UNIT_TYPES)
+
+        return dict(
+            enemy_total_building_health=sum(map(lambda b: b.health, enemy_buildings)),
+            enemy_total_army_health=sum(map(lambda b: b.health, enemy_army)),
+        )
+
+    def _get_actions_state(self, obs: TimeStep) -> Dict[str, int]:
+        available_actions = self.available_actions(obs)
+        return dict(
+            can_harvest_minerals=int(AllActions.HARVEST_MINERALS in available_actions),
+            can_recruit_worker=int(AllActions.RECRUIT_SCV in available_actions),
+            can_build_supply_depot=int(AllActions.BUILD_SUPPLY_DEPOT in available_actions),
+            can_build_command_center=int(AllActions.BUILD_COMMAND_CENTER in available_actions),
+            can_build_barracks=int(AllActions.BUILD_BARRACKS in available_actions),
+            can_recruit_marine=int(AllActions.RECRUIT_MARINE in available_actions),
+            can_attack=int(AllActions.ATTACK_WITH_SINGLE_UNIT in available_actions),
+        )

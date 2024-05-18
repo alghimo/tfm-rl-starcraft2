@@ -29,6 +29,9 @@ class SC2Costs:
     MARINE         = Cost(minerals=50, supply=1)
 
 class Constants:
+    STEP_REWARD = -0.1
+    INVALID_ACTION_REWARD = -1.
+    NO_OP_REWARD = -1.
     COMMAND_CENTER_QUEUE_LENGTH = 5
     # TODO Review places where we use this if we ever add the option to build a reactor
     BARRACKS_QUEUE_LENGTH = 5

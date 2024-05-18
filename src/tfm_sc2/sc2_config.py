@@ -1,21 +1,14 @@
-import os
 
 from pysc2.env import sc2_env
 from pysc2.lib import features, units
-from tfm_sc2.actions import (
-    AllActions,
-    ArmyAttackManagerActions,
-    ArmyRecruitManagerActions,
-    BaseManagerActions,
-    ResourceManagerActions,
-)
+from tfm_sc2.actions import AllActions, ArmyAttackManagerActions, BaseManagerActions
 
 SC2_CONFIG = dict(
     agent_interface_format=features.AgentInterfaceFormat(
                     feature_dimensions=features.Dimensions(screen=256, minimap=64),
                     use_raw_units=True,
                     use_raw_actions=True),
-    step_mul=48,
+    step_mul=32,#48
     game_steps_per_episode=0,
     visualize=True,
     disable_fog=True
@@ -49,7 +42,7 @@ MAP_CONFIGS = dict(
             "bottom_right": {
                 units.Terran.CommandCenter: [(23, 72), (57, 31)],
                 units.Terran.SupplyDepot:
-                    [(51, 79), (53, 79), (55, 77), (57, 76), (59, 76)], #(61, 75), (62, 73), (63, 71), (63, 69), (63, 67), (63, 65), ],
+                    [(51, 78), (54, 78), (55, 77), (57, 77), (59, 77)], #(61, 75), (62, 73), (63, 71), (63, 69), (63, 67), (63, 65), ],
                 units.Terran.Barracks:
                     [(47, 75), (56, 63),]#(52, 63),
             }
@@ -60,7 +53,9 @@ MAP_CONFIGS = dict(
             sc2_env.Agent(sc2_env.Race.terran),
             # sc2_env.Bot(sc2_env.Race.random, sc2_env.Difficulty.very_easy),
         ],
-        available_actions=list(AllActions)
+        available_actions=list(AllActions),
+        # Baseline reward of 100
+        get_score_method="get_num_marines_difference",
     ),
     CollectMineralsAndGas=dict(
         map_name="CollectMineralsAndGas",
@@ -73,7 +68,9 @@ MAP_CONFIGS = dict(
         },
         multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)],
-        available_actions=list(set(list(ResourceManagerActions) + list(BaseManagerActions)))
+        available_actions=list(BaseManagerActions),
+        # Aim for a
+        get_score_method="get_mineral_collection_rate_difference",
     ),
     BuildMarines=dict(
         map_name="BuildMarines",
@@ -93,7 +90,9 @@ MAP_CONFIGS = dict(
         },
         multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)],
-        available_actions=[AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.RECRUIT_SCV, AllActions.BUILD_SUPPLY_DEPOT, AllActions.BUILD_BARRACKS, AllActions.RECRUIT_MARINE]
+        available_actions=[AllActions.NO_OP, AllActions.HARVEST_MINERALS, AllActions.RECRUIT_SCV, AllActions.BUILD_SUPPLY_DEPOT, AllActions.BUILD_BARRACKS, AllActions.RECRUIT_MARINE],
+        # Baseline reward of 50
+        get_score_method="get_num_marines_difference",
         # available_actions=list(set(list(ResourceManagerActions) + list(BaseManagerActions) + list(ArmyRecruitManagerActions)))
     ),
     DefeatRoaches=dict(
@@ -105,7 +104,8 @@ MAP_CONFIGS = dict(
         },
         multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)],
-        available_actions=list(ArmyAttackManagerActions)
+        available_actions=list(ArmyAttackManagerActions),
+        get_score_method="get_reward_as_score",
     ),
     DefeatZerglingsAndBanelings=dict(
         map_name="DefeatRoaches",
@@ -116,6 +116,9 @@ MAP_CONFIGS = dict(
         },
         multiple_positions=False,
         players=[sc2_env.Agent(sc2_env.Race.terran)],
-        available_actions=list(ArmyAttackManagerActions)
+        available_actions=list(ArmyAttackManagerActions),
+        reward_factor=120,
+        # Baseline reward of 100
+        get_score_method="get_reward_as_score",
     )
 )
