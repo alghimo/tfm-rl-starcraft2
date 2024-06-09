@@ -31,6 +31,7 @@ from tfm_sc2.agents.multi.game_manager_dqn_agent import GameManagerDQNAgent
 from tfm_sc2.agents.multi.game_manager_random_agent import GameManagerRandomAgent
 from tfm_sc2.agents.single.single_dqn_agent import SingleDQNAgent
 from tfm_sc2.agents.single.single_random_agent import SingleRandomAgent
+from tfm_sc2.agents.single.single_scripted_agent import SingleScriptedAgent
 from tfm_sc2.networks.dqn_network import DQNNetwork
 from tfm_sc2.networks.experience_replay_buffer import ExperienceReplayBuffer
 from tfm_sc2.sc2_config import MAP_CONFIGS, SC2_CONFIG
@@ -52,7 +53,7 @@ def setup_logging(log_file: str = None):
     if log_file  is not None:
         log_file: Path = Path(log_file)
         log_file.parent.mkdir(exist_ok=True, parents=True)
-    WithLogger.init_logging(file_name=log_file)
+    WithLogger.init_logging(stream_level=logging.DEBUG, file_name=log_file)
     absl_logger = logging.getLogger("absl")
     absl_logger.setLevel(logging.WARNING)
 
@@ -251,17 +252,26 @@ def main(unused_argv):
         game_manager.logger.setLevel(logging.WARNING)
         return game_manager
 
-    if len(map_config["players"]) > 1:
+    if (len(map_config["players"]) > 1) and FLAGS.agent2_path is None:
         for other_agent_type in map_config["players"][1:]:
             if isinstance(other_agent_type, sc2_env.Agent):
-                if FLAGS.agent_key.startswith("single"):
+                # if FLAGS.agent_key.startswith("single"):
+                if not FLAGS.use_scripted_enemy:
                     logger.info(f"Adding random single agent as opponent #{len(other_agents) + 1}#")
                     enemy_agent = SingleRandomAgent(map_name=map_name, map_config=map_config, log_name=f"Random Agent {len(other_agents) + 1}", log_level=logging.ERROR, reward_method=reward_method)
                     enemy_agent.logger.setLevel(logging.WARNING)
-                    other_agents.append(enemy_agent)
-                elif FLAGS.agent_key.startswith("multi"):
-                    logger.info(f"Adding random multi agent as opponent #{len(other_agents) + 1}#")
-                    other_agents.append(_create_random_enemy_gm())
+                else:
+                    logger.info(f"Adding scripted single agent as opponent #{len(other_agents) + 1}#")
+                    enemy_agent = SingleScriptedAgent(map_name=map_name, map_config=map_config, log_name=f"Scripted Agent {len(other_agents) + 1}", log_level=logging.ERROR, reward_method=reward_method)
+                    enemy_agent.logger.setLevel(logging.WARNING)
+                other_agents.append(enemy_agent)
+                # elif FLAGS.agent_key.startswith("multi"):
+                #     logger.info(f"Adding random multi agent as opponent #{len(other_agents) + 1}#")
+                #     other_agents.append(_create_random_enemy_gm())
+    elif (len(map_config["players"]) > 1):
+        logger.info("Loading SingleRandom agent as enemy")
+        enemy_agent = load_or_create_dqn_agent(SingleDQNAgent, exploit=exploit, checkpoint_path=FLAGS.agent2_path, load_agent=True, map_name=map_name, map_config=map_config, reward_method=reward_method, log_name="Enemy Agent - SingleDQN", load_networks_only=False)
+        other_agents.append(enemy_agent)
 
     if buffer_file is None:
         logger.info(f"Creating new buffer with memory size = {memory_size} and burn-in = {burn_in}")
@@ -272,12 +282,14 @@ def main(unused_argv):
             buffer = pickle.load(f)
 
     base_args = dict(map_name=map_name, map_config=map_config, reward_method=reward_method)
-    common_args = dict(buffer=buffer, checkpoint_path=checkpoint_path, load_agent=load_agent,  **base_args)
-    dqn_agent_args = dict(exploit=exploit, load_networks_only=load_networks_only, **common_args)
+    common_args = dict(buffer=buffer, load_agent=load_agent,  **base_args)
+    dqn_agent_args = dict(exploit=exploit, load_networks_only=load_networks_only, checkpoint_path=checkpoint_path, **common_args)
     subagent_args = dict(buffer=None, exploit=True, load_networks_only=False, **base_args)
     match FLAGS.agent_key:
         case "single.random":
             agent = load_or_create_random_agent(cls=SingleRandomAgent, **common_args, log_name="Main Agent - Random")
+        case "single.scripted":
+            agent = load_or_create_random_agent(cls=SingleScriptedAgent, **common_args, log_name="Main Agent - Scripted")
         case "single.dqn":
             agent = load_or_create_dqn_agent(SingleDQNAgent, **dqn_agent_args, log_name="Main Agent - SingleDQN")
         case "multi.random.base_manager":
@@ -308,7 +320,7 @@ def main(unused_argv):
             agent = load_or_create_dqn_agent(ArmyRecruitManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Army Manager")
         case "multi.dqn.army_attack_manager":
             agent = load_or_create_dqn_agent(ArmyAttackManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Attack Manager")
-        case "multi.dqn.game_manager":
+        case "multi.dqn.game_manager" if not FLAGS.use_random_subagents:
             bm_path = checkpoint_path / "base_manager"
             bm_agent_file = bm_path / "agent.pkl"
             arm_path = checkpoint_path / "army_recruit_manager"
@@ -331,6 +343,23 @@ def main(unused_argv):
             )
 
             agent = load_or_create_dqn_agent(GameManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Game Manager", **extra_agent_args)
+        case "multi.dqn.game_manager" if FLAGS.use_random_subagents:
+            bm_path = checkpoint_path / "base_manager"
+            arm_path = checkpoint_path / "army_recruit_manager"
+            aam_path = checkpoint_path / "army_attack_manager"
+            base_manager = load_or_create_random_agent(BaseManagerRandomAgent, **common_args, checkpoint_path=bm_path, log_name="SubAgent - Random BaseManager")
+            base_manager.logger.setLevel(logging.WARNING)
+            army_recruit_manager = load_or_create_random_agent(ArmyRecruitManagerRandomAgent, **common_args, checkpoint_path=arm_path, log_name="SubAgent - Random ArmyRecruitManager")
+            army_recruit_manager.logger.setLevel(logging.WARNING)
+            army_attack_manager = load_or_create_random_agent(ArmyAttackManagerRandomAgent, **common_args, checkpoint_path=aam_path, log_name="SubAgent - Random ArmyAttackManager")
+            army_attack_manager.logger.setLevel(logging.WARNING)
+            extra_agent_args = dict(
+                base_manager=base_manager,
+                army_recruit_manager=army_recruit_manager,
+                army_attack_manager=army_attack_manager
+            )
+
+            agent = load_or_create_dqn_agent(GameManagerDQNAgent, **dqn_agent_args, log_name="Main Agent - Game Manager", **extra_agent_args)
         case _:
             raise RuntimeError(f"Unknown agent key {FLAGS.agent_key}")
     try:
@@ -344,7 +373,7 @@ def main(unused_argv):
         max_episode_failures = 5
         current_episode_failures = 0
         tracker.start()
-        if hasattr(agent, "memory_replay_ready"):
+        if not exploit and hasattr(agent, "memory_replay_ready"):
             is_burnin = not agent.memory_replay_ready
             logger.info(f"Agent has a memory replay buffer. Requires burnin: {is_burnin}")
             burnin_episodes = 0
@@ -387,6 +416,9 @@ def main(unused_argv):
                     logger.info(f"Burnin progress: {100 * agent._buffer.burn_in_capacity:.2f}%")
             logger.info(f"Finished burnin after {burnin_episodes} episodes")
 
+        num_wins = 0
+        num_wins_enemy = 0
+        num_games = 0
         while finished_episodes < FLAGS.num_episodes:
             already_saved = False
             try:
@@ -414,7 +446,10 @@ def main(unused_argv):
                             last_step_actions = [a.step(timestep) for a, timestep in zip([agent, *other_agents], timesteps)]
 
                             for idx, a in enumerate(other_agents):
-                                logger.info(f"Total reward for random agent {idx + 1}: {a.reward}")
+                                logger.info(f"Total reward for enemy agent {idx + 1}: {a.reward}")
+                                win_rate = 100 * (finished_episodes - a.reward) / finished_episodes
+                                logger.info(f"Win rate for main agent: {win_rate:.2f}%")
+
                     current_episode_failures = 0
             except ConnectError as error:
                 logger.error("Couldn't connect to SC2 environment, trying to restart the episode again")
@@ -445,6 +480,7 @@ if __name__ == "__main__":
 
     agent_keys = [
         "single.random",
+        "single.scripted",
         "single.dqn",
         "multi.random.base_manager",
         "multi.random.army_recruit_manager",
@@ -460,7 +496,7 @@ if __name__ == "__main__":
     flags.DEFINE_enum("agent_key", "single.random", agent_keys, "Agent to use.")
     flags.DEFINE_enum("map_name", "Simple64", map_keys, "Map to use.")
     flags.DEFINE_enum("reward_method", default="reward", required=False, enum_values=["reward", "adjusted_reward", "score"], help="What to use to calculate rewards: reward = observation reward, adjusted_reward = observation reward with penalties for step, no-ops and invalid actions, or score deltas (i.e. score increase / decrease + penalty for invalid actions and no-ops).")
-    flags.DEFINE_enum("dqn_size", "large", ["extra_small", "small", "medium", "large", "extra_large"], "Map to use.")
+    flags.DEFINE_enum("dqn_size", "large", ["extra_small", "small", "medium", "large", "extra_large"], "Map to use.", required=False)
     flags.DEFINE_integer("num_episodes", 1, "Number of episodes to play.", lower_bound=1)
 
     flags.DEFINE_integer("memory_size", 100000, required=False, help="Total memory size for the buffer.", lower_bound=100)
@@ -472,9 +508,12 @@ if __name__ == "__main__":
     flags.DEFINE_integer("max_burnin_episodes", 500, "Meximum number of episodes to allow to use for burning replay memories in.", lower_bound=0)
     flags.DEFINE_string("model_id", default=None, help="Determines the folder inside 'models_path' to save the model to", required=False)
     flags.DEFINE_string("models_path", help="Path where checkpoints are written to/loaded from", required=False, default=DEFAULT_MODELS_PATH)
+    flags.DEFINE_string("agent2_path", help="Path to the enemy agent, if you want to use a SingleDQNAgent instead of a random agent as the enemy", required=False, default=None)
     flags.DEFINE_string("buffer_file", help="Path to a buffer to use instead of an empty buffer. Useful to skip burn-ins", required=False, default=None)
     flags.DEFINE_integer("save_frequency_episodes", default=1, help="We save the agent every X episodes.", lower_bound=1, required=False)
     flags.DEFINE_boolean("exploit", default=False, required=False, help="Use the agent in explotation mode, not for training.")
+    flags.DEFINE_boolean("use_scripted_enemy", default=False, required=False, help="Use a scripted enemy instead of a random one.")
+    flags.DEFINE_boolean("use_random_subagents", default=False, required=False, help="Use random sub-agents for the feudal agent.")
     flags.DEFINE_boolean("reset_epsilon", default=False, required=False, help="Reset epsilon to its default when loading an agent.")
     flags.DEFINE_boolean("save_agent", default=True, required=False, help="Whether to save the agent and/or its stats.")
     flags.DEFINE_boolean("random_mode", default=False, required=False, help="Tell the agent to run in random mode. Used mostly to ensure we collect experiences.")

@@ -152,8 +152,8 @@ class DQNAgent(BaseAgent):
         return super().is_training and (not self._random_mode) and (not self._is_burnin)
 
 
-    def select_action(self, obs: TimeStep) -> Tuple[AllActions, Dict[str, Any]]:
-        available_actions = [a for a in self.agent_actions if a in self._map_config["available_actions"]]
+    def select_action(self, obs: TimeStep, available_actions = None) -> Tuple[AllActions, Dict[str, Any]]:
+        available_actions = available_actions or [a for a in self.agent_actions if a in self._map_config["available_actions"]]
 
         # One-hot encoded version of available actions
         valid_actions = self._actions_to_network(available_actions)
@@ -179,6 +179,9 @@ class DQNAgent(BaseAgent):
                 self.logger.info(f"Starting exploit")
                 self._status_flags["exploit_started"] = True
 
+            # Final test, enable invalid action masking during exploitation
+            available_actions = [a for a in self.available_actions(obs) if a != AllActions.NO_OP]
+            valid_actions = self._actions_to_network(available_actions)
             raw_action = self.main_network.get_greedy_action(self._current_state_tensor, valid_actions=valid_actions)
 
         # Convert the "raw" action to a the right type of action

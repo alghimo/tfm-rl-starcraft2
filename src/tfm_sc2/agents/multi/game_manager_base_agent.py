@@ -1,10 +1,10 @@
 import numpy as np
 from pysc2.env.environment import TimeStep
-from pysc2.lib import actions
+from pysc2.lib import actions, units
 
 FUNCTIONS = actions.FUNCTIONS
 RAW_FUNCTIONS = actions.RAW_FUNCTIONS
-from ...actions import AllActions, GameManagerActions
+from ...actions import AllActions, ArmyRecruitManagerActions, GameManagerActions
 from .with_army_attack_manager_actions import WithArmyAttackManagerActions
 from .with_army_recruit_manager_actions import WithArmyRecruitManagerActions
 from .with_base_manager_actions import WithBaseManagerActions
@@ -25,6 +25,7 @@ class GameManagerBaseAgent(WithGameManagerActions):
         self._base_manager.setup_actions()
         self._army_recruit_manager.setup_actions()
         self._army_attack_manager.setup_actions()
+        self._recruit_manager_actions = [ArmyRecruitManagerActions.NO_OP, ArmyRecruitManagerActions.RECRUIT_MARINE, ArmyRecruitManagerActions.BUILD_BARRACKS]
 
     def forward_action(self, obs: TimeStep, action: GameManagerActions):
         match action:
@@ -33,7 +34,7 @@ class GameManagerBaseAgent(WithGameManagerActions):
                 actual_action, action_args, is_valid_action = proxy_manager.select_action(obs=obs)
             case GameManagerActions.EXPAND_ARMY:
                 proxy_manager = self._army_recruit_manager
-                actual_action, action_args, is_valid_action = proxy_manager.select_action(obs=obs)
+                actual_action, action_args, is_valid_action = proxy_manager.select_action(obs=obs, available_actions=self._recruit_manager_actions)
             case GameManagerActions.ATTACK:
                 proxy_manager = self._army_attack_manager
                 actual_action, action_args, is_valid_action = proxy_manager.select_action(obs=obs)
