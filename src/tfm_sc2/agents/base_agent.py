@@ -181,6 +181,7 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
         agent_attrs_file = checkpoint_path / cls._AGENT_FILE
         with open(agent_attrs_file, mode="rb") as f:
             agent_attrs = pickle.load(f)
+
         if "main_network_path" in agent_attrs:
             agent_attrs["main_network_path"] = checkpoint_path / cls._MAIN_NETWORK_FILE
         if "target_network_path" in agent_attrs:
@@ -863,10 +864,10 @@ class BaseAgent(WithLogger, ABC, base_agent.BaseAgent):
             case AllActions.RECRUIT_SCV, args if _has_source_unit_tag(args):
                 command_center_tag = args["source_unit_tag"]
                 command_centers = self.get_self_units(obs, unit_types=units.Terran.CommandCenter, unit_tags=command_center_tag)
-                command_centers = [cc for cc in command_centers if cc.order_length < Constants.COMMAND_CENTER_QUEUE_LENGTH]
+                command_centers = [cc for cc in command_centers if cc.order_length <= Constants.COMMAND_CENTER_QUEUE_LENGTH]
                 if len(command_centers) == 0:
                     return False
-                if command_centers[0].order_length >= Constants.COMMAND_CENTER_QUEUE_LENGTH:
+                if command_centers[0].order_length > Constants.COMMAND_CENTER_QUEUE_LENGTH:
                     return False
                 if not SC2Costs.SCV.can_pay(obs.observation.player):
                     return False
